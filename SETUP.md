@@ -24,7 +24,7 @@ The app creates `Ritlog-fotos` and `Ritlog-app` itself, at the top level of your
 
 1. Create a free account at dash.cloudflare.com.
 2. **Workers & Pages** > open it once. Note your subdomain, shown as `<something>.workers.dev`.
-   Your backend address will be `https://ritlog.<something>.workers.dev` **[save]**
+   Your backend address will be `https://ritlog.roel-51c.workers.dev` **[save]**
 3. **Storage & Databases > KV** > Create namespace, name `ritlog`. Copy its **ID** **[save: KV_NAMESPACE_ID]**
 4. Account ID: on the Workers & Pages overview, right column, **Account ID** **[save: CLOUDFLARE_ACCOUNT_ID]**
 5. API token: profile icon > **My Profile > API Tokens > Create Token** > template **Edit Cloudflare Workers** > Continue > Create. **[save: CLOUDFLARE_API_TOKEN]**
@@ -42,7 +42,7 @@ The app creates `Ritlog-fotos` and `Ritlog-app` itself, at the top level of your
 2. **App registrations > New registration**
    - Name: `Ritlog`
    - Supported account types: **Personal Microsoft accounts only**
-   - Redirect URI: platform **Web**, value `https://ritlog.<something>.workers.dev/auth/callback` (your address from step 2.2)
+   - Redirect URI: platform **Web**, value `https://ritlog.roel-51c.workers.dev/auth/callback` (your address from step 2.2)
    - Register.
 3. On the overview page copy **Application (client) ID** **[save: MS_CLIENT_ID]**
 4. **Certificates & secrets > New client secret**, expiry 24 months. Copy the **Value** (not the ID) right away. **[save: MS_CLIENT_SECRET]**
@@ -64,14 +64,14 @@ The app creates `Ritlog-fotos` and `Ritlog-app` itself, at the top level of your
    - Tab **Variables**, add: `KV_NAMESPACE_ID`
 5. **Settings > Pages**: Source **GitHub Actions**.
 6. **Actions** tab: run **Deploy backend (Cloudflare Worker)** and **Deploy app (GitHub Pages)** (button **Run workflow**). Both should end green.
-7. Check: open `https://ritlog.<something>.workers.dev` in a browser. It shows "Ritlog backend is running."
+7. Check: open `https://ritlog.roel-51c.workers.dev` in a browser. It shows "Ritlog backend is running."
 
 ## 6. Phone
 
-1. In Chrome on Android open `https://<your-github-name>.github.io/ritlog/`
+1. In Chrome on Android open `https://rfonteyninfo.github.io/ritlog/`
 2. Menu (three dots) > **Add to Home screen** > Install.
 3. Open Ritlog > **Settings**:
-   - Backend URL: `https://ritlog.<something>.workers.dev`
+   - Backend URL: `https://ritlog.roel-51c.workers.dev`
    - Access code: your `APP_TOKEN`
    - **Save and test** shows "Backend OK".
 4. **Connect OneDrive** > sign in > accept. Back in the app, Save and test shows "OneDrive connected".
