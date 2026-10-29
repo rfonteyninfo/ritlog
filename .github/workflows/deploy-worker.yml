@@ -1,0 +1,41 @@
+name: Deploy backend (Cloudflare Worker)
+
+on:
+  push:
+    branches: [main]
+    paths: ["worker/**", ".github/workflows/deploy-worker.yml"]
+  workflow_dispatch:
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: worker
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - run: npm ci
+      - name: Fill in KV namespace and app address
+        run: |
+          sed -i "s#__KV_NAMESPACE_ID__#${{ vars.KV_NAMESPACE_ID }}#" wrangler.toml
+          owner="${GITHUB_REPOSITORY_OWNER,,}"
+          sed -i "s#__APP_ORIGIN__#https://${owner}.github.io#" wrangler.toml
+      - uses: cloudflare/wrangler-action@v3
+        with:
+          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          workingDirectory: worker
+          wranglerVersion: "4.154.0"
+          secrets: |
+            APP_TOKEN
+            ANTHROPIC_API_KEY
+            MS_CLIENT_ID
+            MS_CLIENT_SECRET
+        env:
+          APP_TOKEN: ${{ secrets.APP_TOKEN }}
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          MS_CLIENT_ID: ${{ secrets.MS_CLIENT_ID }}
+          MS_CLIENT_SECRET: ${{ secrets.MS_CLIENT_SECRET }}

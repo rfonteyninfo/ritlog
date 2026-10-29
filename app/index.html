@@ -1,0 +1,27 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="theme-color" content="#1f4e79">
+  <title>Ritlog</title>
+  <link rel="manifest" href="manifest.webmanifest">
+  <link rel="icon" href="icons/icon-192.png">
+  <link rel="apple-touch-icon" href="icons/icon-192.png">
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <header>
+    <h1>Ritlog</h1>
+    <nav>
+      <button data-nav="home">Rides</button>
+      <button data-nav="vehicles">Vehicles</button>
+      <button data-nav="settings">Settings</button>
+    </nav>
+  </header>
+  <main id="view"></main>
+  <div id="toast" hidden></div>
+  <input id="camera" type="file" accept="image/*" capture="environment" hidden>
+  <script type="module" src="app.js"></script>
+</body>
+</html>

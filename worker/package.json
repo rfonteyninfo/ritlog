@@ -1,0 +1,16 @@
+{
+  "name": "ritlog-worker",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "deploy": "wrangler deploy",
+    "dev": "wrangler dev"
+  },
+  "dependencies": {
+    "@anthropic-ai/sdk": "^1.3.0",
+    "fflate": "^0.8.2"
+  },
+  "devDependencies": {
+    "wrangler": "^4.154.0"
+  }
+}

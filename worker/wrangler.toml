@@ -1,0 +1,19 @@
+name = "ritlog"
+main = "src/index.js"
+compatibility_date = "2026-09-01"
+compatibility_flags = ["nodejs_compat"]
+
+# Filled in by the GitHub workflow from repository variables (see SETUP.md).
+[[kv_namespaces]]
+binding = "KV"
+id = "__KV_NAMESPACE_ID__"
+
+[vars]
+ALLOWED_ORIGIN = "__APP_ORIGIN__"
+EXCEL_PATH = "/Ritlog/rekenmodule_auto_vs_motor_v4.xlsx"
+PHOTO_ROOT = "/Ritlog-fotos"
+STATE_PATH = "/Ritlog-app/state.json"
+VEHICLE_NAMES = "Auto,Motor,Vespa"
+RIDE_TYPES = "Zakelijk,Pendel,Privé,Fun,Zelfstandig"
+CAMBIO_NAME = "Cambio"
+CLAUDE_MODEL = "claude-opus-5-5"

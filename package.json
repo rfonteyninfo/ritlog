@@ -1,0 +1,8 @@
+{
+  "name": "ritlog-app",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "test": "node test/xlsx.test.mjs /tmp/ritlog-test.xlsx && node test/match.test.mjs"
+  }
+}
