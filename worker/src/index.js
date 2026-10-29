@@ -8,7 +8,7 @@ const XLSX_TYPE = "application/vnd.openxmlformats-officedocument.spreadsheetml.s
 
 function config(env) {
   return {
-    excelPath: env.EXCEL_PATH || "/Ritlog/rekenmodule_auto_vs_motor_v4.xlsx",
+    excelPath: env.EXCEL_PATH || "/Documenten/Git/rekenmodule_auto_vs_motor_v4.xlsx",
     photoRoot: env.PHOTO_ROOT || "/Ritlog-fotos",
     statePath: env.STATE_PATH || "/Ritlog-app/state.json",
     vehicleNames: (env.VEHICLE_NAMES || "Auto,Motor,Vespa").split(",").map((s) => s.trim()),

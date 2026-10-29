@@ -16,11 +16,9 @@ You will create five things. Keep a text file open to paste the values marked **
 
 ## 1. OneDrive
 
-1. Sign in to onedrive.live.com with your **personal** Microsoft account.
-2. Create a folder `Ritlog`.
-3. Upload `rekenmodule_auto_vs_motor_v4.xlsx` into it. The name must match exactly. (To use another name or folder, change `EXCEL_PATH` in `worker/wrangler.toml`.)
+Done. The file is at `Documenten/Git/rekenmodule_auto_vs_motor_v4.xlsx` on your personal OneDrive (`EXCEL_PATH` in `worker/wrangler.toml`). If you move or rename it, change that line.
 
-The app creates `Ritlog-fotos` and `Ritlog-app` itself.
+The app creates `Ritlog-fotos` and `Ritlog-app` itself, at the top level of your OneDrive.
 
 ## 2. Cloudflare
 
