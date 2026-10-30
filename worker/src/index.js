@@ -1,5 +1,5 @@
-// Ritlog backend: odometer reading, app state, photos and Excel rows on OneDrive.
-import { Drive, HttpError, authorizeUrl, exchangeCode, isConnected } from "./graph.js";
+// Ritlog backend: odometer reading, app state, photos and Excel rows on Google Drive.
+import { Drive, HttpError, authorizeUrl, exchangeCode, isConnected } from "./gdrive.js";
 import { readOdometer } from "./odometer.js";
 import { appendRitlogRow, findRideRows } from "./xlsx.js";
 import { rideId, photoName, photoFolder, slug } from "./naming.js";
@@ -8,7 +8,7 @@ const XLSX_TYPE = "application/vnd.openxmlformats-officedocument.spreadsheetml.s
 
 function config(env) {
   return {
-    excelPath: env.EXCEL_PATH || "/Documenten/Git/rekenmodule_auto_vs_motor_v4.xlsx",
+    excelPath: env.EXCEL_PATH || "/Ritlog/rekenmodule_auto_vs_motor_v4.xlsx",
     photoRoot: env.PHOTO_ROOT || "/Ritlog-fotos",
     statePath: env.STATE_PATH || "/Ritlog-app/state.json",
     vehicleNames: (env.VEHICLE_NAMES || "Auto,Motor,Vespa").split(",").map((s) => s.trim()),
@@ -72,7 +72,7 @@ function safeEqual(a, b) {
   return diff === 0;
 }
 
-// ---------- state on OneDrive ----------
+// ---------- state on Google Drive ----------
 
 async function loadState(drive, cfg) {
   const file = await drive.download(cfg.statePath);
@@ -128,7 +128,7 @@ async function writePendingToExcel(drive, cfg) {
   for (let attempt = 0; ; attempt++) {
     try {
       const file = await drive.download(cfg.excelPath);
-      if (!file) throw new HttpError(404, `Excel file not found on OneDrive at ${cfg.excelPath}`);
+      if (!file) throw new HttpError(404, `Excel file not found on Google Drive at ${cfg.excelPath}`);
       const existing = findRideRows(file.bytes);
       let bytes = file.bytes;
       let changed = false;
@@ -341,9 +341,9 @@ async function handleAuth(request, env, url) {
     if (!state || !(await env.KV.get(`oauth_state_${state}`))) return html("Login expired. Start again from the app.", 400);
     await env.KV.delete(`oauth_state_${state}`);
     const error = url.searchParams.get("error_description") || url.searchParams.get("error");
-    if (error) return html(`Microsoft login failed: ${error}`, 400);
+    if (error) return html(`Google login failed: ${error}`, 400);
     await exchangeCode(env, url.searchParams.get("code"), redirectUri);
-    return html("<h2>OneDrive connected</h2><p>You can close this tab and go back to the app.</p>");
+    return html("<h2>Google Drive connected</h2><p>You can close this tab and go back to the app.</p>");
   }
   return html("Not found", 404);
 }

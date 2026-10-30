@@ -1,4 +1,6 @@
-# Ritlog app: design v1 (for approval)
+# Ritlog app: design v1 (approved)
+
+Change 2026-10-30: storage moved from OneDrive to Google Drive (Microsoft Entra needs an Azure directory, which was declined).
 
 Goal: log every ride into the Ritlog tab of `rekenmodule_auto_vs_motor_v4.xlsx` from two odometer photos, with Vehicle, Type, From, To and Client/purpose proposed by the app and confirmed by you in a few taps.
 
@@ -9,14 +11,14 @@ Goal: log every ride into the Ritlog tab of `rekenmodule_auto_vs_motor_v4.xlsx` 
 | Part | Runs on | Role |
 |---|---|---|
 | Web app (PWA) | Android home screen, hosted on GitHub Pages | Camera, GPS, screens, offline queue |
-| Backend | Cloudflare Worker (free tier) | Holds all keys, calls Claude, fetches calendar ICS feeds, geocodes, writes to OneDrive |
-| Excel + photos + app data | OneDrive (personal Microsoft account) | Single source you open in Excel as today |
+| Backend | Cloudflare Worker (free tier) | Holds all keys, calls Claude, fetches calendar ICS feeds, geocodes, writes to Google Drive |
+| Excel + photos + app data | Google Drive (Workspace account roel@fonteyn.info) | Single source, opened in Excel through Google Drive for desktop |
 | Odometer reading | Claude API (vision) | Reads the odometer, returns dashboard class (car / motorcycle / scooter) |
 | Calendars | Google Workspace, secret ICS links | Type, client and place proposals |
 | Addresses | OpenStreetMap Nominatim | GPS to street/town, event location to coordinates |
 
-- The phone only stores one access code for the Worker. No Microsoft, Google or Anthropic keys on the phone.
-- App data (vehicles, places, calendars, rides) is saved as `/Ritlog-app/state.json` on OneDrive, so a lost phone loses nothing.
+- The phone only stores one access code for the Worker. No Google or Anthropic keys on the phone.
+- App data (vehicles, places, calendars, rides) is saved as `/Ritlog-app/state.json` on Google Drive, so a lost phone loses nothing.
 - Offline (parking garage): photos and GPS are queued on the phone and processed when the connection returns.
 
 ---
@@ -145,7 +147,7 @@ On opening, the app shows a warning banner when there are:
 - Format `R` + 4-digit sequence (R0001, R0002, ...). It never changes, even if you edit the row in Excel later.
 
 **Photos**
-- Location: OneDrive `/Ritlog-fotos/YYYY/MM/`.
+- Location: Google Drive `/Ritlog-fotos/YYYY/MM/`.
 - Name: `R0142_2027-01-14_0812_Motor_Zakelijk_Home-Proximus_start.jpg` and `..._end.jpg`.
 - Spaces and special characters are stripped. Compressed to about 300 KB.
 
@@ -174,8 +176,8 @@ Interface language: English.
 
 ## 11. Setup (you do this once, with step-by-step instructions from me)
 
-1. Move the Excel file to OneDrive.
-2. Microsoft Entra: register an app (personal account) for OneDrive access.
+1. Move the Excel file to Google Drive.
+2. Google Cloud: project with the Drive API and an OAuth client (Internal). Free, no billing account.
 3. Anthropic: create an API key.
 4. Cloudflare: account + deploy the Worker, enter the keys as secrets.
 5. GitHub: account + repository, GitHub Pages for the web app.

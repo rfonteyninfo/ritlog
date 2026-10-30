@@ -454,9 +454,9 @@ async function renderSettings() {
     <input id="token" type="password" value="${esc(s.token || "")}">
     <div class="actions"><button class="btn primary" id="save">Save and test</button></div>
     <div id="status" class="muted" style="margin-top:10px"></div>
-    <h2>OneDrive</h2>
-    <p class="muted">Connect once. The backend keeps access to your OneDrive files.</p>
-    <a class="btn" id="connect" target="_blank" rel="noopener">Connect OneDrive</a>`;
+    <h2>Google Drive</h2>
+    <p class="muted">Connect once. The backend keeps access to your Google Drive files.</p>
+    <a class="btn" id="connect" target="_blank" rel="noopener">Connect Google Drive</a>`;
   const connect = view.querySelector("#connect");
   const setLink = () => {
     const u = view.querySelector("#url").value.replace(/\/$/, "");
@@ -472,8 +472,8 @@ async function renderSettings() {
     try {
       const res = await api("/api/status");
       status.innerHTML = res.connected
-        ? `<span class="ok">Backend OK. OneDrive connected.</span><br>Excel file: ${esc(res.config.excelPath)}`
-        : `Backend OK. <b>OneDrive not connected yet.</b>`;
+        ? `<span class="ok">Backend OK. Google Drive connected.</span><br>Excel file: ${esc(res.config.excelPath)}`
+        : `Backend OK. <b>Google Drive not connected yet.</b>`;
     } catch (e) {
       status.textContent = `Problem: ${e.message}`;
     }

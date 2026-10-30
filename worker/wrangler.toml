@@ -10,7 +10,7 @@ id = "__KV_NAMESPACE_ID__"
 
 [vars]
 ALLOWED_ORIGIN = "__APP_ORIGIN__"
-EXCEL_PATH = "/Documenten/Git/rekenmodule_auto_vs_motor_v4.xlsx"
+EXCEL_PATH = "/Ritlog/rekenmodule_auto_vs_motor_v4.xlsx"
 PHOTO_ROOT = "/Ritlog-fotos"
 STATE_PATH = "/Ritlog-app/state.json"
 VEHICLE_NAMES = "Auto,Motor,Vespa"
