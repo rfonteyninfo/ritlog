@@ -65,6 +65,10 @@ Updated after feedback and errors. Each entry: what happened, cause, rule for ne
 - **What happened:** the key started with `sk-ant-usr-`. Normal API keys start with `sk-ant-api`.
 - **Rule:** tell what a valid value looks like (prefix, length) at the step where it is created.
 
+### 11. Secrets entered in the wrong repository (2026-10-31)
+- **What happened:** the GitHub secrets and variable were added to another repository instead of `ritlog`. Secrets cannot be moved or read back, so they had to be entered again.
+- **Rule:** on a GitHub settings page, check the repository name in the page header (`rfonteyninfo / ritlog`) before adding secrets. Give direct links to the right settings page in every instruction.
+
 ---
 
 ## Technical notes
