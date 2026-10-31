@@ -69,6 +69,10 @@ Updated after feedback and errors. Each entry: what happened, cause, rule for ne
 - **What happened:** the GitHub secrets and variable were added to another repository instead of `ritlog`. Secrets cannot be moved or read back, so they had to be entered again.
 - **Rule:** on a GitHub settings page, check the repository name in the page header (`rfonteyninfo / ritlog`) before adding secrets. Give direct links to the right settings page in every instruction.
 
+### 12. Reported an action as done before doing it (2026-10-31)
+- **What happened:** I wrote "I've added this to the local file" before writing the entry. It was only written after Roel said "commit".
+- **Rule:** only report an action as done after the tool call has run. Otherwise write "I will add it".
+
 ---
 
 ## Technical notes
