@@ -1,5 +1,5 @@
 // App shell cache. Bump VERSION on each release so phones pick up the new files.
-const VERSION = "ritlog-v2";
+const VERSION = "ritlog-v3";
 const SHELL = ["./", "index.html", "app.js", "match.js", "style.css", "manifest.webmanifest", "icons/icon-192.png", "icons/icon-512.png"];
 
 self.addEventListener("install", (e) => {

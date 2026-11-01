@@ -110,6 +110,17 @@ globalThis.fetch = async (input, init = {}) => {
     }
     return resp(400, { error: `fake drive: unhandled ${method} ${path}` });
   }
+  if (url.host === "nominatim.openstreetmap.org") {
+    assert.match(new Headers(init.headers).get("User-Agent"), /Ritlog/);
+    if (url.pathname === "/reverse") {
+      const lat = Number(url.searchParams.get("lat"));
+      const road = lat > 50.9 ? "Stationsstraat" : "Kerkstraat";
+      return resp(200, { display_name: `${road} 1, Mechelen, Belgium`, address: { road, house_number: "1", town: "Mechelen", country: "België" } });
+    }
+    if (url.pathname === "/search") {
+      return resp(200, [{ lat: "50.80000", lon: "4.40000", display_name: "Dorpsstraat 5, Kortenberg, Belgium", address: { road: "Dorpsstraat", village: "Kortenberg" } }]);
+    }
+  }
   return realFetch(input, init);
 };
 
@@ -152,7 +163,10 @@ const { createRequire } = await import("node:module");
 const require = createRequire(process.env.PLAYWRIGHT_FROM || import.meta.url);
 const { chromium } = require("playwright");
 const browser = await chromium.launch();
-const page = await browser.newPage({ viewport: { width: 390, height: 844 } });
+const HOME = { latitude: 50.8001, longitude: 4.4001 }; // ~15 m from the Home place found by search
+const CLIENT = { latitude: 50.95, longitude: 4.47 };
+const context = await browser.newContext({ viewport: { width: 390, height: 844 }, permissions: ["geolocation"], geolocation: HOME });
+const page = await context.newPage();
 const errors = [];
 page.on("pageerror", (e) => errors.push(e.message));
 page.on("dialog", (d) => d.accept());
@@ -191,6 +205,19 @@ for (const [name, km, cls] of [["Motor", 12, "motorcycle"], ["Auto", 25, "car"]]
 }
 await snap("2-vehicles");
 
+// Add Home as a known place via address search
+await page.click('nav button[data-nav="places"]');
+await page.click("#add");
+await page.fill("#name", "Home");
+await page.selectOption("#cat", "Home");
+await page.fill("#q", "Dorpsstraat 5 Kortenberg");
+await page.click("#search");
+await page.click("button.result");
+assert.equal(await page.textContent("#loc"), "Dorpsstraat, Kortenberg");
+await page.click("#save");
+await page.waitForSelector("text=radius 300 m");
+await snap("2b-places");
+
 // Ride on the Motor: reading 30 with motorcycle dashboard -> Motor proposed (Auto range overlaps)
 await page.click('nav button[data-nav="home"]');
 readings.push({ readable: true, odometer_km: 30, unit: "km", dashboard_class: "motorcycle", confidence: "high", note: "" });
@@ -202,29 +229,43 @@ await page.click("#go");
 await page.waitForSelector("text=without an end photo");
 await snap("4-open");
 
+await context.setGeolocation(CLIENT);
 readings.push({ readable: true, odometer_km: 72, unit: "km", dashboard_class: "motorcycle", confidence: "high", note: "" });
 await shoot("[data-end]");
 await page.waitForSelector("#save");
 assert.equal(await page.textContent("#km"), "42 km");
+assert.equal(await page.inputValue("#from"), "Home"); // known place
+assert.equal(await page.inputValue("#to"), "Stationsstraat, Mechelen"); // street, town from GPS
+assert.equal(await page.inputValue("#type"), "Privé"); // default when no place type
 await page.selectOption("#type", "Zakelijk");
-await page.fill("#from", "Home");
 await page.fill("#to", "Proximus Evere");
+await page.check("#np-to");
+await page.selectOption("#np-to-cat", "Client");
+await page.selectOption("#np-to-type", "Zakelijk");
 await page.fill("#client", "Proximus");
 await snap("5-end");
 await page.click("#save");
 await page.waitForSelector("text=Excel row 5");
 await snap("6-home");
 
-// Cambio: unknown car odometer
+// Cambio: unknown car odometer, starts at the new client place, ends at Home
+const stAfter1 = JSON.parse(new TextDecoder().decode(files.get("/Ritlog-app/state.json").bytes));
+assert.deepEqual(stAfter1.places.map((p) => [p.name, p.category, p.defaultType]).sort(), [["Home", "Home", ""], ["Proximus Evere", "Client", "Zakelijk"]]);
+assert.ok(stAfter1.rides[0].startLocation && stAfter1.rides[0].endLocation);
 readings.push({ readable: true, odometer_km: 48211, unit: "km", dashboard_class: "car", confidence: "high", note: "" });
 await shoot("#startRide");
 await page.waitForSelector("#go");
 assert.equal((await page.locator("#vehicle option:checked").textContent()).trim(), "Cambio");
 await page.click("#go");
 await page.waitForSelector("[data-end]");
+await context.setGeolocation(HOME);
 readings.push({ readable: true, odometer_km: 48270, unit: "km", dashboard_class: "car", confidence: "high", note: "" });
 await shoot("[data-end]");
 await page.waitForSelector("#save");
+assert.equal(await page.inputValue("#from"), "Proximus Evere");
+assert.equal(await page.inputValue("#to"), "Home");
+assert.equal(await page.inputValue("#type"), "Zakelijk"); // from the client place's default type
+assert.equal(await page.locator("#np-to").count(), 0); // known place: no save option
 await page.selectOption("#type", "Privé");
 await page.fill("#note", "check invoice");
 await page.click("#save");
@@ -234,7 +275,7 @@ await page.waitForSelector("text=Excel row 6");
 const names = [...files.keys()].sort();
 assert.ok(names.some((n) => /\/Ritlog-fotos\/\d{4}\/\d{2}\/R0001_\d{4}-\d{2}-\d{2}_\d{4}_Motor_Zakelijk_Home-ProximusEvere_start\.jpg$/.test(n)));
 assert.ok(names.some((n) => /R0001_.*_end\.jpg$/.test(n)));
-assert.ok(names.some((n) => /R0002_.*_Cambio_Prive_Unknown-Unknown_start\.jpg$/.test(n)));
+assert.ok(names.some((n) => /R0002_.*_Cambio_Prive_ProximusEvere-Home_start\.jpg$/.test(n)));
 assert.ok(!names.some((n) => n.includes("_pending")));
 const st = JSON.parse(new TextDecoder().decode(files.get("/Ritlog-app/state.json").bytes));
 assert.equal(st.vehicles.find((v) => v.name === "Motor").lastReading, 72);

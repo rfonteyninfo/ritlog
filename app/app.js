@@ -1,6 +1,7 @@
-import { proposeVehicle, checkEndReading } from "./match.js";
+import { proposeVehicle, checkEndReading, nearestPlace, proposeType } from "./match.js";
 
 const DEFAULT_CLASS = { Auto: "car", Motor: "motorcycle", Vespa: "scooter" };
+const PLACE_CATEGORIES = ["Home", "Work", "Syntra", "Client", "Other"];
 const view = document.getElementById("view");
 const camera = document.getElementById("camera");
 
@@ -118,13 +119,49 @@ async function readOdometer(image) {
   }
 }
 
+// Current GPS position {lat, lon, accuracy}, or null if denied/unavailable.
+// Ride photos ask for a fresh fix (maxAge 0): a cached one could still be the start position.
+function getPosition(timeout = 20000, maxAge = 0) {
+  return new Promise((resolve) => {
+    if (!navigator.geolocation) return resolve(null);
+    navigator.geolocation.getCurrentPosition(
+      (p) => resolve({ lat: p.coords.latitude, lon: p.coords.longitude, accuracy: Math.round(p.coords.accuracy) }),
+      () => resolve(null),
+      { enableHighAccuracy: true, timeout, maximumAge: maxAge }
+    );
+  });
+}
+
+async function addressOf(loc) {
+  if (!loc) return "";
+  try {
+    return (await api("/api/geocode/reverse", { lat: loc.lat, lon: loc.lon })).address;
+  } catch {
+    return "";
+  }
+}
+
+function places() {
+  return app.state?.places || [];
+}
+
+function typeOptions(selected, allowEmpty) {
+  const types = app.config?.rideTypes || ["Zakelijk", "Pendel", "Privé", "Fun", "Zelfstandig"];
+  return (allowEmpty ? `<option value="" ${!selected ? "selected" : ""}>None</option>` : "") +
+    types.map((t) => `<option ${t === selected ? "selected" : ""}>${esc(t)}</option>`).join("");
+}
+
+function categoryOptions(selected) {
+  return PLACE_CATEGORIES.map((c) => `<option ${c === selected ? "selected" : ""}>${c}</option>`).join("");
+}
+
 function activeVehicles() {
   return (app.state?.vehicles || []).filter((v) => v.active);
 }
 
 // ---------- screens ----------
 
-const routes = { home: renderHome, vehicles: renderVehicles, settings: renderSettings };
+const routes = { home: renderHome, vehicles: renderVehicles, places: renderPlaces, settings: renderSettings };
 
 function go(name) {
   document.querySelectorAll("nav button").forEach((b) => b.classList.toggle("active", b.dataset.nav === name));
@@ -212,6 +249,7 @@ async function refresh() {
 // ----- start ride -----
 
 async function startRide() {
+  const position = getPosition(); // runs while the camera is open
   let image;
   try {
     image = await takePhoto();
@@ -219,6 +257,7 @@ async function startRide() {
     return;
   }
   const ocr = await readOdometer(image);
+  const location = await position;
   const vehicles = activeVehicles();
   const cambio = app.config?.cambioName || "Cambio";
   const reading = ocr.readable ? ocr.odometer_km : -1;
@@ -269,8 +308,9 @@ async function startRide() {
         date,
         time,
         image,
+        location,
       });
-      toast(`Ride ${res.ride.id} started.`);
+      toast(`Ride ${res.ride.id} started.${location ? "" : " No GPS position."}`);
     } catch (e) {
       toast(e.message, 6000);
     }
@@ -283,6 +323,7 @@ async function startRide() {
 async function endRide(id) {
   const ride = app.state.openRides.find((r) => r.id === id);
   if (!ride) return renderHome();
+  const position = getPosition(); // runs while the camera is open
   let image;
   try {
     image = await takePhoto();
@@ -290,8 +331,30 @@ async function endRide(id) {
     return;
   }
   const ocr = await readOdometer(image);
+  busy("Looking up location…");
+  const endLocation = await position;
+  const fromMatch = nearestPlace(places(), ride.startLocation);
+  const toMatch = nearestPlace(places(), endLocation);
+  const [fromAddress, toAddress] = await Promise.all([
+    fromMatch ? "" : addressOf(ride.startLocation),
+    toMatch ? "" : addressOf(endLocation),
+  ]);
+  const from = fromMatch ? fromMatch.place.name : fromAddress;
+  const to = toMatch ? toMatch.place.name : toAddress;
+  const proposedType = proposeType(fromMatch?.place, toMatch?.place);
   const reading = ocr.readable ? ocr.odometer_km : "";
-  const types = app.config?.rideTypes || ["Zakelijk", "Pendel", "Privé", "Fun", "Zelfstandig"];
+
+  // Offer to save unknown start/end positions as known places.
+  const newPlaceBlock = (key, label, loc) =>
+    loc
+      ? `<label class="check"><input type="checkbox" id="np-${key}"> Save ${label} as known place</label>
+         <div id="np-${key}-fields" hidden>
+           <label>Category</label><select id="np-${key}-cat">${categoryOptions("Other")}</select>
+           <label>Default type</label><select id="np-${key}-type">${typeOptions("", true)}</select>
+         </div>`
+      : "";
+  const locHint = (match, loc) =>
+    match ? `Known place, ${match.distance} m away.` : loc ? "Address from GPS." : "No GPS position.";
 
   view.innerHTML = `
     <h2>End ride ${esc(ride.id)} · ${esc(ride.vehicle)}</h2>
@@ -302,9 +365,13 @@ async function endRide(id) {
     <div class="km" id="km"></div>
     <div class="muted" id="kmWarn"></div>
     <label>Type</label>
-    <select id="type"><option value="" selected disabled>Choose…</option>${types.map((t) => `<option>${esc(t)}</option>`).join("")}</select>
-    <label>From</label><input id="from" autocomplete="off">
-    <label>To</label><input id="to" autocomplete="off">
+    <select id="type">${typeOptions(proposedType, false)}</select>
+    <label>From</label><input id="from" autocomplete="off" value="${esc(from)}">
+    <div class="muted">${locHint(fromMatch, ride.startLocation)}</div>
+    ${fromMatch ? "" : newPlaceBlock("from", "start", ride.startLocation)}
+    <label>To</label><input id="to" autocomplete="off" value="${esc(to)}">
+    <div class="muted">${locHint(toMatch, endLocation)}</div>
+    ${toMatch ? "" : newPlaceBlock("to", "destination", endLocation)}
     <label>Client / purpose</label><input id="client" autocomplete="off">
     <label>Note</label><input id="note" autocomplete="off">
     <div class="actions">
@@ -312,6 +379,11 @@ async function endRide(id) {
       <button class="btn" id="retake">Retake photo</button>
       <button class="btn" id="back">Back</button>
     </div>`;
+
+  for (const key of ["from", "to"]) {
+    const box = view.querySelector(`#np-${key}`);
+    if (box) box.onchange = () => (view.querySelector(`#np-${key}-fields`).hidden = !box.checked);
+  }
 
   const input = view.querySelector("#reading");
   const updateKm = () => {
@@ -333,7 +405,14 @@ async function endRide(id) {
     const warn = checkEndReading(ride.startReading, v, `${ride.date} ${ride.startTime}`, new Date(), app.state.settings?.maxKmPerDay || 600);
     if (warn && !confirm(`${warn}\nSave anyway?`)) return;
     const val = (sel) => view.querySelector(sel).value.trim();
-    const payload = { reading: v, time: nowLocal().time, image, type, from: val("#from"), to: val("#to"), client: val("#client"), note: val("#note") };
+    const newPlaces = [];
+    for (const [key, loc, address] of [["from", ride.startLocation, fromAddress], ["to", endLocation, toAddress]]) {
+      if (!view.querySelector(`#np-${key}`)?.checked) continue;
+      const name = val(`#${key}`);
+      if (!name) return toast(`Enter a name in ${key === "from" ? "From" : "To"} to save it as a place.`);
+      newPlaces.push({ name, category: val(`#np-${key}-cat`), defaultType: val(`#np-${key}-type`), lat: loc.lat, lon: loc.lon, radius: 300, address });
+    }
+    const payload = { reading: v, time: nowLocal().time, image, type, from: val("#from"), to: val("#to"), client: val("#client"), note: val("#note"), location: endLocation, newPlaces };
     busy("Saving ride…");
     try {
       const res = await api(`/api/rides/${encodeURIComponent(id)}/finish`, payload);
@@ -342,6 +421,106 @@ async function endRide(id) {
       toast(e.message, 6000);
     }
     renderHome();
+  };
+}
+
+// ----- places -----
+
+function renderPlaces() {
+  const list = places().slice().sort((a, b) => a.category.localeCompare(b.category) || a.name.localeCompare(b.name));
+  let out = `<button class="big" id="add">Add place</button><h2>Known places</h2>`;
+  if (!list.length) out += `<p class="muted">None yet. Add Home, your office(s) and Syntra first.</p>`;
+  for (const p of list) {
+    out += `<div class="card"><div class="row"><b>${esc(p.name)}</b><span class="chip">${esc(p.category)}</span></div>
+      <div class="muted">${esc(p.address || `${p.lat.toFixed(5)}, ${p.lon.toFixed(5)}`)} · radius ${p.radius} m${p.defaultType ? ` · default ${esc(p.defaultType)}` : ""}</div>
+      <div class="actions"><button class="btn" data-edit="${esc(p.id)}">Edit</button><button class="btn" data-del="${esc(p.id)}">Delete</button></div></div>`;
+  }
+  view.innerHTML = out;
+  view.querySelector("#add").onclick = () => editPlace(null);
+  view.querySelectorAll("[data-edit]").forEach((b) => (b.onclick = () => editPlace(places().find((p) => p.id === b.dataset.edit))));
+  view.querySelectorAll("[data-del]").forEach(
+    (b) =>
+      (b.onclick = async () => {
+        const p = places().find((x) => x.id === b.dataset.del);
+        if (!confirm(`Delete ${p.name}?`)) return;
+        busy("Saving…");
+        try {
+          await api(`/api/places/${p.id}/delete`, {});
+        } catch (e) {
+          toast(e.message);
+        }
+        renderPlaces();
+      })
+  );
+}
+
+function editPlace(place) {
+  let loc = place ? { lat: place.lat, lon: place.lon, address: place.address } : null;
+  view.innerHTML = `
+    <h2>${place ? "Edit place" : "Add place"}</h2>
+    <label>Name</label><input id="name" autocomplete="off" value="${esc(place?.name || "")}" placeholder="Home, Huawei Mechelen, Syntra Antwerpen…">
+    <label>Category</label><select id="cat">${categoryOptions(place?.category || "Other")}</select>
+    <label>Default type (proposed when you drive here)</label><select id="type">${typeOptions(place?.defaultType || "", true)}</select>
+    <label>Radius (m)</label><input id="radius" type="number" inputmode="numeric" value="${place?.radius || 300}">
+    <label>Location</label>
+    <div class="muted" id="loc">${loc ? esc(loc.address || `${loc.lat.toFixed(5)}, ${loc.lon.toFixed(5)}`) : "Not set yet."}</div>
+    <div class="actions"><button class="btn" id="here">Use my current location</button></div>
+    <label>Or search an address</label>
+    <div class="row"><input id="q" autocomplete="off" placeholder="Street 1, Town"><button class="btn" id="search">Search</button></div>
+    <div id="results"></div>
+    <div class="actions"><button class="btn primary" id="save">Save</button><button class="btn" id="back">Cancel</button></div>`;
+  const showLoc = () => (view.querySelector("#loc").textContent = loc ? loc.address || `${loc.lat.toFixed(5)}, ${loc.lon.toFixed(5)}` : "Not set yet.");
+  view.querySelector("#back").onclick = renderPlaces;
+  view.querySelector("#here").onclick = async () => {
+    view.querySelector("#loc").textContent = "Getting GPS position…";
+    const p = await getPosition();
+    if (!p) {
+      showLoc();
+      return toast("No GPS position. Allow location for this app.");
+    }
+    loc = { lat: p.lat, lon: p.lon, address: await addressOf(p) };
+    showLoc();
+  };
+  view.querySelector("#search").onclick = async () => {
+    const q = view.querySelector("#q").value.trim();
+    if (!q) return;
+    const box = view.querySelector("#results");
+    box.innerHTML = `<div class="muted">Searching…</div>`;
+    try {
+      const { results } = await api("/api/geocode/search", { query: q });
+      if (!results.length) return (box.innerHTML = `<div class="muted">Nothing found.</div>`);
+      box.innerHTML = results.map((r, i) => `<button class="btn result" data-i="${i}">${esc(r.display)}</button>`).join("");
+      box.querySelectorAll("[data-i]").forEach(
+        (b) =>
+          (b.onclick = () => {
+            const r = results[Number(b.dataset.i)];
+            loc = { lat: r.lat, lon: r.lon, address: r.address || r.display };
+            box.innerHTML = "";
+            showLoc();
+          })
+      );
+    } catch (e) {
+      box.innerHTML = `<div class="muted">${esc(e.message)}</div>`;
+    }
+  };
+  view.querySelector("#save").onclick = async () => {
+    const body = {
+      name: view.querySelector("#name").value.trim(),
+      category: view.querySelector("#cat").value,
+      defaultType: view.querySelector("#type").value,
+      radius: Number(view.querySelector("#radius").value) || 300,
+    };
+    if (!body.name) return toast("Enter a name.");
+    if (!loc) return toast("Set the location: current location or search an address.");
+    Object.assign(body, { lat: loc.lat, lon: loc.lon, address: loc.address || "" });
+    busy("Saving…");
+    try {
+      await api(place ? `/api/places/${place.id}/update` : "/api/places", body);
+      toast(`${body.name} saved.`);
+    } catch (e) {
+      toast(e.message, 6000);
+    }
+    renderPlaces();
   };
 }
 

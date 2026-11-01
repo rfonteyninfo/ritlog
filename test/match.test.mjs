@@ -36,3 +36,17 @@ assert.equal(
   "R0142_2027-01-14_0812_Motor_Zakelijk_Home-ProximusEvere_start.jpg"
 );
 console.log("match + naming tests ok");
+
+// ---------- places ----------
+const { distanceM, nearestPlace, proposeType } = await import("../app/match.js");
+const home = { id: "h", name: "Home", lat: 51.0, lon: 4.4, radius: 300, defaultType: "" };
+const office = { id: "o", name: "Huawei", lat: 51.01, lon: 4.4, radius: 300, defaultType: "Zakelijk" };
+assert.ok(Math.abs(distanceM(home, office) - 1112) < 5);
+assert.equal(nearestPlace([home, office], { lat: 51.001, lon: 4.4, accuracy: 20 }).place.name, "Home");
+assert.equal(nearestPlace([home, office], { lat: 51.005, lon: 4.4, accuracy: 20 }), null);
+assert.equal(nearestPlace([home], { lat: 51.0035, lon: 4.4, accuracy: 100 }).place.name, "Home"); // 389 m, within 300+100
+assert.equal(nearestPlace([home], null), null);
+assert.equal(proposeType(home, office), "Zakelijk");
+assert.equal(proposeType(office, home), "Zakelijk");
+assert.equal(proposeType(null, null), "Privé");
+console.log("places tests ok");

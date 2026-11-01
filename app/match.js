@@ -61,3 +61,33 @@ export function checkEndReading(startReading, endReading, startStamp, now = new 
   if (endReading - startReading > days * maxKmPerDay) return `That is ${endReading - startReading} km. More than expected, please check.`;
   return null;
 }
+
+// ---------- places (phase 2) ----------
+
+// Distance in metres between two GPS points.
+export function distanceM(a, b) {
+  const R = 6371000;
+  const rad = (d) => (d * Math.PI) / 180;
+  const dLat = rad(b.lat - a.lat);
+  const dLon = rad(b.lon - a.lon);
+  const h = Math.sin(dLat / 2) ** 2 + Math.cos(rad(a.lat)) * Math.cos(rad(b.lat)) * Math.sin(dLon / 2) ** 2;
+  return 2 * R * Math.asin(Math.sqrt(h));
+}
+
+// Closest known place whose radius contains the location. GPS accuracy (capped at 100 m)
+// widens the radius a little, so a weak fix next to the building still matches.
+export function nearestPlace(places, loc) {
+  if (!loc || !places?.length) return null;
+  let best = null;
+  for (const p of places) {
+    const d = distanceM(loc, p);
+    const limit = p.radius + Math.min(loc.accuracy || 0, 100);
+    if (d <= limit && (!best || d < best.distance)) best = { place: p, distance: Math.round(d) };
+  }
+  return best;
+}
+
+// Type proposal for phase 2: default Type of the destination, else of the start place, else Privé.
+export function proposeType(fromPlace, toPlace, fallback = "Privé") {
+  return toPlace?.defaultType || fromPlace?.defaultType || fallback;
+}

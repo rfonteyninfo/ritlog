@@ -1,6 +1,7 @@
 // Ritlog backend: odometer reading, app state, photos and Excel rows on Google Drive.
 import { Drive, HttpError, authorizeUrl, exchangeCode, isConnected } from "./gdrive.js";
 import { readOdometer } from "./odometer.js";
+import { reverseGeocode, searchAddress } from "./geo.js";
 import { appendRitlogRow, findRideRows } from "./xlsx.js";
 import { rideId, photoName, photoFolder, slug } from "./naming.js";
 
@@ -18,7 +19,7 @@ function config(env) {
 }
 
 function emptyState() {
-  return { version: 1, nextRideNo: 1, vehicles: [], openRides: [], rides: [], settings: { maxKmPerDay: 600 } };
+  return { version: 1, nextRideNo: 1, vehicles: [], places: [], openRides: [], rides: [], settings: { maxKmPerDay: 600 } };
 }
 
 // ---------- helpers ----------
@@ -70,6 +71,36 @@ function safeEqual(a, b) {
   let diff = 0;
   for (let i = 0; i < a.length; i++) diff |= a.charCodeAt(i) ^ b.charCodeAt(i);
   return diff === 0;
+}
+
+// GPS position from the app: {lat, lon, accuracy} or null.
+function cleanLocation(loc) {
+  if (!loc || typeof loc !== "object") return null;
+  const lat = Number(loc.lat), lon = Number(loc.lon);
+  if (!(Math.abs(lat) <= 90 && Math.abs(lon) <= 180)) return null;
+  const accuracy = Number(loc.accuracy);
+  return { lat, lon, accuracy: accuracy >= 0 ? Math.round(accuracy) : null };
+}
+
+const PLACE_CATEGORIES = ["Home", "Work", "Syntra", "Client", "Other"];
+
+function cleanPlace(body, cfg) {
+  required(body, ["name", "category", "lat", "lon"]);
+  const loc = cleanLocation(body);
+  if (!loc) throw new HttpError(400, "Invalid coordinates");
+  if (!PLACE_CATEGORIES.includes(body.category)) throw new HttpError(400, `category must be one of ${PLACE_CATEGORIES.join(", ")}`);
+  if (body.defaultType && !cfg.rideTypes.includes(body.defaultType)) throw new HttpError(400, `Unknown type ${body.defaultType}`);
+  const radius = Math.round(Number(body.radius) || 300);
+  if (!(radius >= 50 && radius <= 5000)) throw new HttpError(400, "radius must be between 50 and 5000 m");
+  return {
+    name: String(body.name).trim().slice(0, 60),
+    category: body.category,
+    lat: loc.lat,
+    lon: loc.lon,
+    radius,
+    defaultType: body.defaultType || "",
+    address: String(body.address || "").slice(0, 200),
+  };
 }
 
 // ---------- state on Google Drive ----------
@@ -230,6 +261,43 @@ async function handleApi(request, env, url) {
     return json(env, { state });
   }
 
+  if (path === "/api/geocode/reverse" && request.method === "POST") {
+    return json(env, await reverseGeocode(Number(body.lat), Number(body.lon)));
+  }
+
+  if (path === "/api/geocode/search" && request.method === "POST") {
+    required(body, ["query"]);
+    return json(env, { results: await searchAddress(body.query) });
+  }
+
+  if (path === "/api/places" && request.method === "POST") {
+    const place = cleanPlace(body, cfg);
+    const { state, result } = await updateState(drive, cfg, (s) => {
+      s.places ??= [];
+      const p = { id: crypto.randomUUID(), ...place };
+      s.places.push(p);
+      return p;
+    });
+    return json(env, { place: result, state });
+  }
+
+  if ((m = path.match(/^\/api\/places\/([\w-]+)\/update$/)) && request.method === "POST") {
+    const place = cleanPlace(body, cfg);
+    const { state } = await updateState(drive, cfg, (s) => {
+      const p = (s.places || []).find((x) => x.id === m[1]);
+      if (!p) throw new HttpError(404, "Place not found");
+      Object.assign(p, place);
+    });
+    return json(env, { state });
+  }
+
+  if ((m = path.match(/^\/api\/places\/([\w-]+)\/delete$/)) && request.method === "POST") {
+    const { state } = await updateState(drive, cfg, (s) => {
+      s.places = (s.places || []).filter((x) => x.id !== m[1]);
+    });
+    return json(env, { state });
+  }
+
   if (path === "/api/rides/start" && request.method === "POST") {
     required(body, ["vehicle", "date", "time", "image"]);
     checkDate(body.date, body.time);
@@ -249,6 +317,7 @@ async function handleApi(request, env, url) {
         startReading: reading,
         date: body.date,
         startTime: body.time,
+        startLocation: cleanLocation(body.location),
         startPhoto: null,
       };
       r.startPhoto = `${cfg.photoRoot}/_pending/${r.id}_start.jpg`;
@@ -282,6 +351,8 @@ async function handleApi(request, env, url) {
     const km = endReading - open.startReading;
     if (!(km >= 0)) throw new HttpError(400, `End reading ${endReading} is lower than start reading ${open.startReading}`);
     if (!cfg.rideTypes.includes(body.type)) throw new HttpError(400, `Unknown type ${body.type}`);
+    // Optional new known places, saved together with the ride.
+    const newPlaces = (Array.isArray(body.newPlaces) ? body.newPlaces : []).slice(0, 2).map((p) => cleanPlace(p, cfg));
 
     const ride = {
       id: open.id,
@@ -298,6 +369,8 @@ async function handleApi(request, env, url) {
       startReading: open.startReading,
       endReading,
       km,
+      startLocation: open.startLocation || null,
+      endLocation: cleanLocation(body.location),
       excel: "pending",
     };
     const folder = photoFolder(cfg.photoRoot, ride.date);
@@ -309,7 +382,11 @@ async function handleApi(request, env, url) {
 
     await updateState(drive, cfg, (s) => {
       s.openRides = s.openRides.filter((r) => r.id !== ride.id);
-      if (!s.rides.some((r) => r.id === ride.id)) s.rides.push(ride);
+      if (!s.rides.some((r) => r.id === ride.id)) {
+        s.rides.push(ride);
+        s.places ??= [];
+        for (const p of newPlaces) s.places.push({ id: crypto.randomUUID(), ...p });
+      }
       const v = s.vehicles.find((x) => x.id === ride.vehicleId);
       if (v && endReading >= (v.lastReading ?? 0)) {
         v.lastReading = endReading;
