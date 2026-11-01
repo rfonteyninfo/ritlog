@@ -80,3 +80,4 @@ Updated after feedback and errors. Each entry: what happened, cause, rule for ne
 - The cloud container has no `rsync`. Use `tar` to copy folders.
 - Node ES modules ignore `NODE_PATH`. Load a global package (Playwright) with `createRequire`.
 - A chain of commands with `&&` stops at the first failure. Check the output before assuming later steps ran.
+- GPS (2026-11-01, caught in testing): the browser can return a cached position (`maximumAge`). For ride photos, always ask for a fresh position (`maximumAge: 0`), or the end of a short ride can get the start position.
