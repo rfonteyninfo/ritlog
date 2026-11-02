@@ -164,11 +164,11 @@ function activeVehicles() {
 const routes = { home: renderHome, vehicles: renderVehicles, places: renderPlaces, settings: renderSettings };
 
 function go(name) {
-  document.querySelectorAll("nav button").forEach((b) => b.classList.toggle("active", b.dataset.nav === name));
+  document.querySelectorAll("nav.tabbar button").forEach((b) => b.classList.toggle("active", b.dataset.nav === name));
   routes[name]();
 }
 
-document.querySelectorAll("nav button").forEach((b) => (b.onclick = () => go(b.dataset.nav)));
+document.querySelectorAll("nav.tabbar button").forEach((b) => (b.onclick = () => go(b.dataset.nav)));
 
 function renderHome() {
   const s = app.state;
@@ -669,4 +669,4 @@ async function renderSettings() {
 
 if ("serviceWorker" in navigator) navigator.serviceWorker.register("sw.js").catch(() => {});
 go("home");
-if (app.settings.workerUrl && app.state) api("/api/state").then(() => document.querySelector("nav button.active")?.dataset.nav === "home" && renderHome()).catch(() => {});
+if (app.settings.workerUrl && app.state) api("/api/state").then(() => document.querySelector("nav.tabbar button.active")?.dataset.nav === "home" && renderHome()).catch(() => {});

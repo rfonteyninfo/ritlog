@@ -1,93 +1,117 @@
+/* Ritlog: styled after the "Huawei Identity Reference" design system
+   (colors, square corners, red as ~10% accent on white and greys).
+   No logo, no Huawei name, no Huawei Line (the guidelines tie brand elements to the logo). */
 :root {
-  --bg: #f4f6f8;
-  --card: #ffffff;
-  --text: #1b1f23;
-  --muted: #5f6b76;
-  --line: #d9dee3;
-  --primary: #1f4e79;
-  --primary-text: #ffffff;
-  --warn-bg: #fff4d6;
-  --warn-line: #e0b84c;
-  --error-bg: #fde8e8;
-  --error-line: #d66;
-  --ok: #2e7d32;
+  --red: #C7000B;          /* huawei-red: accent, primary actions */
+  --on-red: #FFFFFF;
+  --surface: #FFFFFF;      /* surface */
+  --surface-quiet: #F4F4F4;/* surface-quiet */
+  --ink: #231815;          /* ink */
+  --ink-muted: #595757;    /* ink-muted */
+  --rule: #DCDDDD;         /* rule */
+  --heading: #C7000B;      /* red headings pass 4.5:1 on white */
+  --tab-active: #C7000B;
+  --font: Arial, Roboto, "Helvetica Neue", system-ui, sans-serif; /* system family */
 }
 @media (prefers-color-scheme: dark) {
   :root {
-    --bg: #12161a;
-    --card: #1c2228;
-    --text: #e6e9ec;
-    --muted: #9aa5af;
-    --line: #2f3740;
-    --primary: #5b9bd5;
-    --primary-text: #0b1520;
-    --warn-bg: #3a3019;
-    --warn-line: #8a6d1f;
-    --error-bg: #3b1d1d;
-    --error-line: #a44;
-    --ok: #66bb6a;
+    --surface: #232424;    /* template-dark */
+    --surface-quiet: #2F3030;
+    --ink: #FFFFFF;
+    --ink-muted: #DCDDDD;
+    --rule: #595757;
+    --heading: #FFFFFF;    /* red is ~2.5:1 on dark: never text there */
+    --tab-active: #FFFFFF;
   }
 }
-* { box-sizing: border-box; }
+* { box-sizing: border-box; border-radius: 0; }
+html, body { background: var(--surface); }
 body {
   margin: 0;
-  background: var(--bg);
-  color: var(--text);
-  font: 16px/1.4 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
-  padding-bottom: env(safe-area-inset-bottom);
+  color: var(--ink);
+  font: 16px/1.45 var(--font);
+  padding-bottom: calc(64px + env(safe-area-inset-bottom));
 }
+
+/* Top bar: white ground, plain title */
 header {
   position: sticky; top: 0; z-index: 2;
-  background: var(--primary); color: var(--primary-text);
-  padding: 10px 16px calc(6px) 16px;
+  background: var(--surface);
+  border-bottom: 1px solid var(--rule);
+  padding: calc(10px + env(safe-area-inset-top)) 16px 10px;
 }
-header h1 { margin: 0 0 6px; font-size: 20px; }
-nav { display: flex; gap: 6px; }
-nav button {
-  flex: 1; border: 0; border-radius: 8px; padding: 8px 4px;
-  background: rgba(255,255,255,.15); color: inherit; font-size: 15px;
+header h1 { margin: 0; font-size: 20px; font-weight: 700; letter-spacing: .2px; }
+
+/* Bottom tab bar */
+nav.tabbar {
+  position: fixed; left: 0; right: 0; bottom: 0; z-index: 3;
+  display: flex;
+  background: var(--surface);
+  border-top: 1px solid var(--rule);
+  padding-bottom: env(safe-area-inset-bottom);
 }
-nav button.active { background: rgba(255,255,255,.35); font-weight: 600; }
-main { padding: 12px 16px 80px; max-width: 640px; margin: 0 auto; }
-h2 { font-size: 18px; margin: 18px 0 8px; }
+nav.tabbar button {
+  flex: 1; height: 56px; border: 0; background: transparent;
+  color: var(--ink-muted); font: 13px/1 var(--font);
+  display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 4px;
+  border-top: 3px solid transparent;
+}
+nav.tabbar button svg { width: 22px; height: 22px; stroke: currentColor; fill: none; stroke-width: 1.8; }
+nav.tabbar button.active { color: var(--tab-active); font-weight: 700; border-top-color: var(--red); }
+
+main { padding: 12px 16px 24px; max-width: 640px; margin: 0 auto; }
+h2 { font-size: 18px; font-weight: 700; margin: 20px 0 8px; color: var(--heading); }
+
 .card {
-  background: var(--card); border: 1px solid var(--line); border-radius: 12px;
-  padding: 12px; margin-bottom: 10px;
+  background: var(--surface); border: 1px solid var(--rule);
+  padding: 12px 14px; margin-bottom: 8px;
 }
 .row { display: flex; justify-content: space-between; gap: 8px; align-items: center; }
-.muted { color: var(--muted); font-size: 14px; }
+.row input { flex: 1; }
+.muted { color: var(--ink-muted); font-size: 14px; }
+
+/* Primary action: full-width red block */
 .big {
-  display: block; width: 100%; padding: 18px; font-size: 19px; font-weight: 600;
-  border: 0; border-radius: 12px; background: var(--primary); color: var(--primary-text);
-  margin: 8px 0 4px;
+  display: block; width: 100%; min-height: 56px; padding: 16px; margin: 8px 0 4px;
+  font: 700 18px/1.2 var(--font);
+  border: 0; background: var(--red); color: var(--on-red);
 }
 button.btn, a.btn {
-  display: inline-block; padding: 10px 14px; border-radius: 10px; font-size: 15px;
-  border: 1px solid var(--line); background: var(--card); color: var(--text); text-decoration: none;
+  display: inline-block; min-height: 44px; padding: 10px 16px;
+  font: 15px/1.4 var(--font); text-decoration: none;
+  border: 1px solid var(--ink-muted); background: var(--surface); color: var(--ink);
 }
-button.primary { background: var(--primary); color: var(--primary-text); border-color: var(--primary); }
+button.primary { background: var(--red); color: var(--on-red); border-color: var(--red); font-weight: 700; }
 button:disabled { opacity: .5; }
-.actions { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 10px; }
-.banner { border-radius: 10px; padding: 10px 12px; margin-bottom: 10px; border: 1px solid; }
-.banner.warn { background: var(--warn-bg); border-color: var(--warn-line); }
-.banner.error { background: var(--error-bg); border-color: var(--error-line); }
-label { display: block; font-size: 14px; color: var(--muted); margin: 10px 0 4px; }
+.big:active, button.primary:active { filter: brightness(.9); }
+.actions { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 12px; }
+
+/* Notices: quiet panel, no colored fills */
+.banner { padding: 10px 12px; margin-bottom: 10px; background: var(--surface-quiet); border: 1px solid var(--rule); }
+.banner b { color: var(--heading); }
+.banner.error { border-color: var(--red); }
+
+label { display: block; font-size: 14px; color: var(--ink-muted); margin: 12px 0 4px; }
+label.check { display: flex; gap: 8px; align-items: center; color: var(--ink); margin-top: 8px; }
+label.check input { width: 20px; height: 20px; accent-color: var(--red); }
 input, select, textarea {
-  width: 100%; padding: 10px; font-size: 16px; border-radius: 8px;
-  border: 1px solid var(--line); background: var(--card); color: var(--text);
+  width: 100%; min-height: 44px; padding: 10px; font: 16px var(--font);
+  border: 1px solid var(--rule); background: var(--surface); color: var(--ink);
 }
-input.reading { font-size: 26px; font-weight: 700; letter-spacing: 1px; text-align: center; }
-img.preview { width: 100%; max-height: 260px; object-fit: contain; border-radius: 10px; background: #000; }
-.km { font-size: 22px; font-weight: 700; text-align: center; margin: 6px 0; }
-.ok { color: var(--ok); }
-.chip { display: inline-block; font-size: 12px; padding: 2px 8px; border-radius: 10px; border: 1px solid var(--line); }
-#toast {
-  position: fixed; left: 16px; right: 16px; bottom: calc(16px + env(safe-area-inset-bottom));
-  background: var(--text); color: var(--bg); padding: 12px 14px; border-radius: 10px; z-index: 5;
+input:focus, select:focus, button:focus-visible { outline: 2px solid var(--red); outline-offset: 1px; }
+@media (prefers-color-scheme: dark) {
+  input:focus, select:focus, button:focus-visible { outline-color: var(--ink); }
 }
-.spinner { text-align: center; padding: 24px; color: var(--muted); }
-label.check { display: flex; gap: 8px; align-items: center; color: var(--text); margin-top: 6px; }
-label.check input { width: auto; }
-.row input { flex: 1; }
+input.reading { font-size: 28px; font-weight: 700; letter-spacing: 1px; text-align: center; }
+img.preview { width: 100%; max-height: 260px; object-fit: contain; background: #000; display: block; }
+.km { font-size: 24px; font-weight: 700; text-align: center; margin: 8px 0; }
+.ok { font-weight: 700; color: var(--ink); }
+.chip { display: inline-block; font-size: 12px; padding: 2px 8px; border: 1px solid var(--rule); color: var(--ink-muted); }
+.chip.ok { border-color: var(--ink-muted); color: var(--ink); font-weight: 400; }
 button.result { display: block; width: 100%; text-align: left; margin-top: 6px; font-size: 14px; }
-nav button { font-size: 14px; }
+
+#toast {
+  position: fixed; left: 16px; right: 16px; bottom: calc(72px + env(safe-area-inset-bottom));
+  background: var(--ink); color: var(--surface); padding: 12px 14px; z-index: 5;
+}
+.spinner { text-align: center; padding: 32px; color: var(--ink-muted); }
