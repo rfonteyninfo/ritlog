@@ -6,7 +6,10 @@ const TOKEN_URL = "https://oauth2.googleapis.com/token";
 const API = "https://www.googleapis.com/drive/v3";
 const UPLOAD = "https://www.googleapis.com/upload/drive/v3";
 // Full Drive scope: the app must open the Excel file you uploaded yourself.
-export const SCOPES = "https://www.googleapis.com/auth/drive";
+// Calendar read-only: meetings propose the Type and client of a ride (phase 3).
+export const SCOPES = "https://www.googleapis.com/auth/drive https://www.googleapis.com/auth/calendar.readonly";
+const CALENDAR_SCOPE = "https://www.googleapis.com/auth/calendar.readonly";
+const SCOPES_KEY = "google_scopes";
 const REFRESH_KEY = "google_refresh_token";
 const FOLDER = "application/vnd.google-apps.folder";
 
@@ -39,6 +42,7 @@ async function tokenRequest(env, params) {
     throw new Error(`Google token error: ${json.error_description || json.error || res.status}`);
   }
   if (json.refresh_token) await env.KV.put(REFRESH_KEY, json.refresh_token);
+  if (json.scope) await env.KV.put(SCOPES_KEY, json.scope);
   return json.access_token;
 }
 
@@ -48,6 +52,11 @@ export function exchangeCode(env, code, redirectUri) {
 
 export async function isConnected(env) {
   return !!(await env.KV.get(REFRESH_KEY));
+}
+
+// True once the Google login includes calendar access (granted scopes are stored at each token refresh).
+export async function hasCalendarAccess(env) {
+  return ((await env.KV.get(SCOPES_KEY)) || "").split(" ").includes(CALENDAR_SCOPE);
 }
 
 function q(s) {

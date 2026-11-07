@@ -116,3 +116,5 @@ button.result { display: block; width: 100%; text-align: left; margin-top: 6px; 
   background: var(--ink); color: var(--surface); padding: 12px 14px; z-index: 5;
 }
 .spinner { text-align: center; padding: 32px; color: var(--ink-muted); }
+details { margin: 8px 0; }
+details summary { cursor: pointer; padding: 8px 0; }

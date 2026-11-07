@@ -1,4 +1,4 @@
-import { proposeVehicle, checkEndReading, nearestPlace, proposeType } from "./match.js";
+import { proposeVehicle, checkEndReading, nearestPlace, DEFAULT_CALENDAR, pickEvent, proposeRideType, looksMixed } from "./match.js";
 
 const DEFAULT_CLASS = { Auto: "car", Motor: "motorcycle", Vespa: "scooter" };
 const PLACE_CATEGORIES = ["Home", "Work", "Syntra", "Client", "Other"];
@@ -143,6 +143,27 @@ async function addressOf(loc) {
 
 function places() {
   return app.state?.places || [];
+}
+
+function calendarRules() {
+  return { ...DEFAULT_CALENDAR, ...(app.state?.settings?.calendar || {}) };
+}
+
+function localDate(date, time) {
+  const [y, m, d] = date.split("-").map(Number);
+  const [hh, mm] = String(time || "00:00").split(":").map(Number);
+  return new Date(y, m - 1, d, hh, mm);
+}
+
+// Meeting around the ride, or null. Calendar problems never block the ride.
+async function meetingFor(rideStart, rideEnd, rules) {
+  const win = rules.windowMin * 60000;
+  try {
+    const res = await api("/api/calendar/events", { from: new Date(rideStart - win).toISOString(), to: new Date(rideEnd.getTime() + win).toISOString() });
+    return { pick: pickEvent(res.events, rideStart, rideEnd, rules), error: res.error };
+  } catch (e) {
+    return { pick: null, error: e.message };
+  }
 }
 
 function typeOptions(selected, allowEmpty) {
@@ -340,28 +361,40 @@ async function endRide(id, pre = null) {
     busy("Looking up location…");
     endLocation = await position;
   }
+  busy("Checking places and calendar…");
+  const rules = calendarRules();
+  const rideStart = localDate(ride.date, ride.startTime);
+  const rideEnd = new Date();
   const fromMatch = nearestPlace(places(), ride.startLocation);
   const toMatch = nearestPlace(places(), endLocation);
-  const [fromAddress, toAddress] = await Promise.all([
+  const [fromAddress, toAddress, cal] = await Promise.all([
     fromMatch ? "" : addressOf(ride.startLocation),
     toMatch ? "" : addressOf(endLocation),
+    meetingFor(rideStart, rideEnd, rules),
   ]);
-  const from = fromMatch ? fromMatch.place.name : fromAddress;
-  const to = toMatch ? toMatch.place.name : toAddress;
-  const proposedType = proposeType(fromMatch?.place, toMatch?.place);
+  const meeting = cal.pick;
+  // An unknown place where the meeting is gets the meeting's name (client, else subject).
+  const meetingAt = (key) => meeting && meeting.relation === key && meeting.client;
+  const from = fromMatch ? fromMatch.place.name : meetingAt("from") || fromAddress;
+  const to = toMatch ? toMatch.place.name : meetingAt("to") || toAddress;
+  const typeProposal = proposeRideType({ calendarType: meeting?.type, fromPlace: fromMatch?.place, toPlace: toMatch?.place, date: rideStart });
   const reading = pre ? pre.reading : ocr.readable ? ocr.odometer_km : "";
+  const meetingDomains = meeting ? meeting.event.domains.filter((d) => !rules.personalDomains.includes(d) && !rules.employerDomains.includes(d)) : [];
+  const hhmm = (iso) => new Date(iso).toTimeString().slice(0, 5);
 
-  // Offer to save unknown start/end positions as known places.
-  const newPlaceBlock = (key, label, loc) =>
-    loc
-      ? `<label class="check"><input type="checkbox" id="np-${key}"> Save ${label} as known place</label>
+  // Offer to save unknown start/end positions as known places; prefilled from the meeting when it was there.
+  const newPlaceBlock = (key, label, loc) => {
+    if (!loc) return "";
+    const fromMeeting = meetingAt(key);
+    const cat = fromMeeting ? (meeting.type === "Zelfstandig" ? "Syntra" : "Client") : "Other";
+    return `<label class="check"><input type="checkbox" id="np-${key}"> Save ${label} as known place</label>
          <div id="np-${key}-fields" hidden>
-           <label>Category</label><select id="np-${key}-cat">${categoryOptions("Other")}</select>
-           <label>Default type</label><select id="np-${key}-type">${typeOptions("", true)}</select>
-         </div>`
-      : "";
-  const locHint = (match, loc) =>
-    match ? `Known place, ${match.distance} m away.` : loc ? "Address from GPS." : "No GPS position.";
+           <label>Category</label><select id="np-${key}-cat">${categoryOptions(cat)}</select>
+           <label>Default type</label><select id="np-${key}-type">${typeOptions(fromMeeting ? meeting.type : "", true)}</select>
+         </div>`;
+  };
+  const locHint = (match, loc, key) =>
+    match ? `Known place, ${match.distance} m away.` : meetingAt(key) ? "Name from the meeting." : loc ? "Address from GPS." : "No GPS position.";
 
   view.innerHTML = `
     <h2>End ride ${esc(ride.id)} · ${esc(ride.vehicle)}</h2>
@@ -372,15 +405,19 @@ async function endRide(id, pre = null) {
     <div class="muted">${ocr.readable ? `Read with ${esc(ocr.confidence)} confidence.` : "Could not read the number. Type it."} ${esc(ocr.note || "")}</div>
     <div class="km" id="km"></div>
     <div class="muted" id="kmWarn"></div>
+    ${meeting ? `<div class="banner"><b>Meeting:</b> ${esc(meeting.event.summary || "(no title)")}, ${hhmm(meeting.event.start)} to ${hhmm(meeting.event.end)}${meeting.event.domains.length ? ` · ${esc(meeting.event.domains.join(", "))}` : ""}</div>` : ""}
+    ${cal.error ? `<div class="muted">${esc(cal.error)}</div>` : ""}
     <label>Type</label>
-    <select id="type">${typeOptions(proposedType, false)}</select>
+    <select id="type">${typeOptions(typeProposal.type, false)}</select>
+    <div class="muted">${esc(typeProposal.reason)}</div>
+    <label class="check" id="mixedRow" hidden><input type="checkbox" id="mixed"> Mark as mixed: check for private stop</label>
     <label>From</label><input id="from" autocomplete="off" value="${esc(from)}">
-    <div class="muted">${locHint(fromMatch, ride.startLocation)}</div>
+    <div class="muted">${locHint(fromMatch, ride.startLocation, "from")}</div>
     ${fromMatch ? "" : newPlaceBlock("from", "start", ride.startLocation)}
     <label>To</label><input id="to" autocomplete="off" value="${esc(to)}">
-    <div class="muted">${locHint(toMatch, endLocation)}</div>
+    <div class="muted">${locHint(toMatch, endLocation, "to")}</div>
     ${toMatch ? "" : newPlaceBlock("to", "destination", endLocation)}
-    <label>Client / purpose</label><input id="client" autocomplete="off">
+    <label>Client / purpose</label><input id="client" autocomplete="off" value="${esc(meeting?.client || "")}">
     <label>Note</label><input id="note" autocomplete="off">
     <div class="actions">
       <button class="btn primary" id="save">Save ride</button>
@@ -394,6 +431,17 @@ async function endRide(id, pre = null) {
   }
 
   const input = view.querySelector("#reading");
+  // Business ride much longer than the straight line: offer (and pre-tick) the mixed mark.
+  let mixedAuto = null;
+  const updateMixed = () => {
+    const km = Number(input.value) - ride.startReading;
+    const show = view.querySelector("#type").value === "Zakelijk" && km > 0 && looksMixed(km, ride.startLocation, endLocation, rules);
+    view.querySelector("#mixedRow").hidden = !show;
+    if (show && mixedAuto === null) mixedAuto = view.querySelector("#mixed").checked = true;
+    if (!show) view.querySelector("#mixed").checked = false;
+  };
+  view.querySelector("#type").addEventListener("change", updateMixed);
+  input.addEventListener("input", updateMixed);
   const updateKm = () => {
     const v = Number(input.value);
     const warn = input.value ? checkEndReading(ride.startReading, v, `${ride.date} ${ride.startTime}`, new Date(), app.state.settings?.maxKmPerDay || 600) : "Enter the odometer reading.";
@@ -402,6 +450,7 @@ async function endRide(id, pre = null) {
   };
   input.oninput = updateKm;
   updateKm();
+  updateMixed();
 
   view.querySelector("#back").onclick = renderHome;
   view.querySelector("#retake").onclick = () => endRide(id);
@@ -419,9 +468,11 @@ async function endRide(id, pre = null) {
       if (!view.querySelector(`#np-${key}`)?.checked) continue;
       const name = val(`#${key}`);
       if (!name) return toast(`Enter a name in ${key === "from" ? "From" : "To"} to save it as a place.`);
-      newPlaces.push({ name, category: val(`#np-${key}-cat`), defaultType: val(`#np-${key}-type`), lat: loc.lat, lon: loc.lon, radius: 300, address });
+      newPlaces.push({ name, category: val(`#np-${key}-cat`), defaultType: val(`#np-${key}-type`), lat: loc.lat, lon: loc.lon, radius: 300, address, domains: meetingAt(key) ? meetingDomains : [] });
     }
-    const payload = { reading: v, time: nowLocal().time, image, type, from: val("#from"), to: val("#to"), client: val("#client"), note: val("#note"), location: endLocation, newPlaces };
+    let note = val("#note");
+    if (view.querySelector("#mixed").checked && !/mixed/i.test(note)) note = ["mixed: check for private stop", note].filter(Boolean).join("; ");
+    const payload = { reading: v, time: nowLocal().time, image, type, from: val("#from"), to: val("#to"), client: val("#client"), note, location: endLocation, newPlaces };
     busy("Saving ride…");
     try {
       const res = await api(`/api/rides/${encodeURIComponent(id)}/finish`, payload);
@@ -688,9 +739,11 @@ async function renderSettings() {
     <input id="token" type="password" value="${esc(s.token || "")}">
     <div class="actions"><button class="btn primary" id="save">Save and test</button></div>
     <div id="status" class="muted" style="margin-top:10px"></div>
-    <h2>Google Drive</h2>
-    <p class="muted">Connect once. The backend keeps access to your Google Drive files.</p>
-    <a class="btn" id="connect" target="_blank" rel="noopener">Connect Google Drive</a>`;
+    <h2>Google</h2>
+    <p class="muted">Connect once. The backend keeps access to your Google Drive files and reads your calendar.</p>
+    <a class="btn" id="connect" target="_blank" rel="noopener">Connect Google</a>
+    ${calendarSettingsHtml()}`;
+  bindCalendarSettings();
   const connect = view.querySelector("#connect");
   const setLink = () => {
     const u = view.querySelector("#url").value.replace(/\/$/, "");
@@ -706,7 +759,8 @@ async function renderSettings() {
     try {
       const res = await api("/api/status");
       status.innerHTML = res.connected
-        ? `<span class="ok">Backend OK. Google Drive connected.</span><br>Excel file: ${esc(res.config.excelPath)}`
+        ? `<span class="ok">Backend OK. Google Drive connected.</span><br>Excel file: ${esc(res.config.excelPath)}<br>` +
+          (res.calendar ? `<span class="ok">Calendar connected.</span>` : `<b>Calendar not connected yet:</b> tap Connect Google and allow the calendar.`)
         : `Backend OK. <b>Google Drive not connected yet.</b>`;
     } catch (e) {
       status.textContent = `Problem: ${e.message}`;
@@ -718,6 +772,86 @@ async function renderSettings() {
     api("/api/state").catch(() => {});
   };
   test();
+}
+
+// ----- calendar settings -----
+
+function calendarSettingsHtml() {
+  const c = calendarRules();
+  const list = (a) => esc((a || []).join(", "));
+  const sources = c.sources
+    .map(
+      (src, i) => `<div class="card" data-src="${i}">
+        <div class="row"><b>${esc(src.name)}</b><span class="chip">${esc(src.calendarId)}</span></div>
+        <label>Type for every meeting in this calendar</label>
+        <select class="src-type">${typeOptions(src.type, true).replace(">None<", ">None: use the rules below<")}</select>
+        ${i > 0 ? `<div class="actions"><button class="btn src-del">Remove calendar</button></div>` : ""}
+      </div>`
+    )
+    .join("");
+  return `
+    <h2>Calendar</h2>
+    <p class="muted">Meetings around a ride propose its type and client. The calendar wins over Pendel and place defaults.</p>
+    <div id="sources">${sources}</div>
+    <details><summary class="muted">Add another Google calendar</summary>
+      <label>Name</label><input id="srcName" placeholder="Syntra lessons">
+      <label>Calendar ID (Google Calendar > settings of that calendar > Integrate calendar)</label><input id="srcId" placeholder="...@group.calendar.google.com">
+      <label>Type</label><select id="srcType">${typeOptions("Zelfstandig", false)}</select>
+      <div class="actions"><button class="btn" id="srcAdd">Add calendar</button></div>
+    </details>
+    <h2>Rules for meetings</h2>
+    <label>Zelfstandig: attendee domains</label><input id="zDomains" value="${list(c.zelfstandigDomains)}">
+    <label>Zelfstandig: words in the meeting title</label><input id="zWords" value="${list(c.zelfstandigKeywords)}">
+    <label>Employer domains (Zakelijk, never shown as client)</label><input id="eDomains" value="${list(c.employerDomains)}">
+    <label>Personal domains (never Zakelijk, never a client)</label><input id="pDomains" value="${list(c.personalDomains)}">
+    <p class="muted">Any other attendee domain makes the meeting Zakelijk and becomes the client name.</p>
+    <label>Time window around a ride (minutes)</label><input id="win" type="number" inputmode="numeric" value="${c.windowMin}">
+    <h2>Mixed rides</h2>
+    <p class="muted">A Zakelijk ride is marked "mixed" when its km exceed factor × straight-line distance + extra km.</p>
+    <div class="row"><label style="flex:1">Factor<input id="mixF" type="number" step="0.1" value="${c.mixedFactor}"></label><label style="flex:1">Extra km<input id="mixKm" type="number" value="${c.mixedMinKm}"></label></div>
+    <div class="actions"><button class="btn primary" id="calSave">Save calendar settings</button></div>`;
+}
+
+function bindCalendarSettings() {
+  const c = calendarRules();
+  const sources = c.sources.map((x) => ({ ...x }));
+  const save = async () => {
+    view.querySelectorAll("[data-src]").forEach((card) => (sources[Number(card.dataset.src)].type = card.querySelector(".src-type").value));
+    const body = {
+      sources,
+      zelfstandigDomains: view.querySelector("#zDomains").value,
+      zelfstandigKeywords: view.querySelector("#zWords").value,
+      employerDomains: view.querySelector("#eDomains").value,
+      personalDomains: view.querySelector("#pDomains").value,
+      windowMin: Number(view.querySelector("#win").value),
+      mixedFactor: Number(view.querySelector("#mixF").value),
+      mixedMinKm: Number(view.querySelector("#mixKm").value),
+    };
+    try {
+      await api("/api/settings/calendar", body);
+      toast("Calendar settings saved.");
+    } catch (e) {
+      toast(e.message, 6000);
+    }
+    renderSettings();
+  };
+  view.querySelector("#calSave").onclick = save;
+  view.querySelectorAll(".src-del").forEach(
+    (b) =>
+      (b.onclick = () => {
+        sources.splice(Number(b.closest("[data-src]").dataset.src), 1);
+        b.closest("[data-src]").remove();
+        view.querySelectorAll("[data-src]").forEach((card, i) => (card.dataset.src = i));
+        save();
+      })
+  );
+  view.querySelector("#srcAdd").onclick = () => {
+    const calendarId = view.querySelector("#srcId").value.trim();
+    if (!calendarId) return toast("Enter the calendar ID.");
+    view.querySelectorAll("[data-src]").forEach((card) => (sources[Number(card.dataset.src)].type = card.querySelector(".src-type").value));
+    sources.push({ id: `google-${Date.now()}`, name: view.querySelector("#srcName").value.trim() || calendarId, kind: "google", calendarId, type: view.querySelector("#srcType").value });
+    save();
+  };
 }
 
 // ---------- start ----------

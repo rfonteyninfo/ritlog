@@ -6,6 +6,7 @@ import assert from "node:assert/strict";
 
 const realFetch = globalThis.fetch;
 const readings = []; // queued odometer answers
+let calendarCalls = 0;
 const EXCEL = "/Ritlog/rekenmodule_auto_vs_motor_v4.xlsx";
 const FOLDER = "application/vnd.google-apps.folder";
 
@@ -50,7 +51,7 @@ globalThis.fetch = async (input, init = {}) => {
   const url = new URL(typeof input === "string" ? input : input.url);
   const method = (init.method || "GET").toUpperCase();
   if (url.host === "oauth2.googleapis.com") {
-    return resp(200, { access_token: "at", refresh_token: "rt" });
+    return resp(200, { access_token: "at", refresh_token: "rt", scope: "https://www.googleapis.com/auth/drive https://www.googleapis.com/auth/calendar.readonly" });
   }
   if (url.host === "api.anthropic.com") {
     const next = readings.shift();
@@ -61,6 +62,18 @@ globalThis.fetch = async (input, init = {}) => {
       content: [{ type: "text", text: JSON.stringify(next) }],
       usage: { input_tokens: 1, output_tokens: 1 },
     });
+  }
+  if (url.host === "www.googleapis.com" && url.pathname.startsWith("/calendar/v3/calendars/primary/events")) {
+    // One meeting with a client, 30 minutes from now; served for the first ride only.
+    const items = calendarCalls++ === 0
+      ? [
+          { id: "e1", status: "confirmed", summary: "Proximus workshop", location: "Evere",
+            start: { dateTime: new Date(Date.now() + 30 * 60000).toISOString() }, end: { dateTime: new Date(Date.now() + 90 * 60000).toISOString() },
+            attendees: [{ email: "roel@huawei.com", self: true, responseStatus: "accepted" }, { email: "jan@proximus.com" }, { email: "piet@huawei.com" }] },
+          { id: "e2", status: "confirmed", summary: "Verjaardag", start: { date: "2026-01-01" }, end: { date: "2026-01-02" } },
+        ]
+      : [];
+    return resp(200, { items });
   }
   if (url.host === "www.googleapis.com") {
     const path = url.pathname;
@@ -190,6 +203,13 @@ await page.fill("#url", "http://localhost:8787");
 await page.fill("#token", "secret-code");
 await page.click("#save");
 await page.waitForSelector("text=Google Drive connected");
+await page.waitForSelector("text=Calendar connected.");
+await page.fill("#zDomains", "syntra-ab.be, coachpraktijk.be");
+await page.click("#calSave");
+await page.waitForSelector("text=Calendar settings saved.");
+const stCal = JSON.parse(new TextDecoder().decode(files.get("/Ritlog-app/state.json").bytes));
+assert.deepEqual(stCal.settings.calendar.zelfstandigDomains, ["syntra-ab.be", "coachpraktijk.be"]);
+assert.equal(stCal.settings.calendar.sources[0].calendarId, "primary");
 await snap("1-settings");
 
 // Register Motor and Auto (both new, near 0 km)
@@ -235,14 +255,15 @@ await shoot("[data-end]");
 await page.waitForSelector("#save");
 assert.equal(await page.textContent("#km"), "42 km");
 assert.equal(await page.inputValue("#from"), "Home"); // known place
-assert.equal(await page.inputValue("#to"), "Stationsstraat, Mechelen"); // street, town from GPS
-assert.equal(await page.inputValue("#type"), "Privé"); // default when no place type
-await page.selectOption("#type", "Zakelijk");
-await page.fill("#to", "Proximus Evere");
+assert.equal(await page.inputValue("#to"), "Proximus"); // unknown place, named after the meeting's client
+assert.equal(await page.inputValue("#type"), "Zakelijk"); // from the calendar
+assert.equal(await page.inputValue("#client"), "Proximus"); // attendee domain, huawei.com ignored
+await page.waitForSelector("text=Proximus workshop");
+assert.ok(await page.isVisible("text=Name from the meeting."));
 await page.check("#np-to");
-await page.selectOption("#np-to-cat", "Client");
-await page.selectOption("#np-to-type", "Zakelijk");
-await page.fill("#client", "Proximus");
+assert.equal(await page.inputValue("#np-to-cat"), "Client");
+assert.equal(await page.inputValue("#np-to-type"), "Zakelijk");
+await page.fill("#to", "Proximus Evere");
 await snap("5-end");
 await page.click("#save");
 await page.waitForSelector("text=Excel row 5");
@@ -251,6 +272,7 @@ await snap("6-home");
 // Cambio: unknown car odometer, starts at the new client place, ends at Home
 const stAfter1 = JSON.parse(new TextDecoder().decode(files.get("/Ritlog-app/state.json").bytes));
 assert.deepEqual(stAfter1.places.map((p) => [p.name, p.category, p.defaultType]).sort(), [["Home", "Home", ""], ["Proximus Evere", "Client", "Zakelijk"]]);
+assert.deepEqual(stAfter1.places.find((p) => p.name === "Proximus Evere").domains, ["proximus.com"]);
 assert.ok(stAfter1.rides[0].startLocation && stAfter1.rides[0].endLocation);
 readings.push({ readable: true, odometer_km: 48211, unit: "km", dashboard_class: "car", confidence: "high", note: "" });
 await shoot("#startRide");
@@ -265,8 +287,11 @@ await page.waitForSelector("#save");
 assert.equal(await page.inputValue("#from"), "Proximus Evere");
 assert.equal(await page.inputValue("#to"), "Home");
 assert.equal(await page.inputValue("#type"), "Zakelijk"); // from the client place's default type
+assert.ok(await page.isVisible("#mixedRow")); // 59 km for ~17 km straight line
+assert.ok(await page.isChecked("#mixed"));
 assert.equal(await page.locator("#np-to").count(), 0); // known place: no save option
 await page.selectOption("#type", "Privé");
+assert.ok(await page.isHidden("#mixedRow")); // only for Zakelijk
 await page.fill("#note", "check invoice");
 await page.click("#save");
 await page.waitForSelector("text=Excel row 6");

@@ -91,3 +91,88 @@ export function nearestPlace(places, loc) {
 export function proposeType(fromPlace, toPlace, fallback = "Privé") {
   return toPlace?.defaultType || fromPlace?.defaultType || fallback;
 }
+
+// ---------- calendar and Type rules (phase 3) ----------
+
+export const DEFAULT_CALENDAR = {
+  sources: [{ id: "google-primary", name: "Google Calendar", kind: "google", calendarId: "primary", type: "" }],
+  windowMin: 60,
+  zelfstandigDomains: ["syntra-ab.be"],
+  zelfstandigKeywords: ["syntra"],
+  employerDomains: ["huawei.com"],
+  personalDomains: ["fonteyn.info", "gmail.com", "googlemail.com", "outlook.com", "hotmail.com", "live.com", "icloud.com"],
+  mixedFactor: 2,
+  mixedMinKm: 5,
+};
+
+// "proximus.com" -> "Proximus", "mail.syntra-ab.be" -> "Syntra-ab"
+export function nameFromDomain(domain) {
+  const labels = String(domain).toLowerCase().split(".").filter(Boolean);
+  const main = labels.length >= 2 ? labels[labels.length - 2] : labels[0] || "";
+  return main ? main[0].toUpperCase() + main.slice(1) : "";
+}
+
+// Type a meeting points to: its calendar's fixed type, else the rules, else "".
+export function eventType(ev, rules) {
+  if (ev.sourceType) return ev.sourceType;
+  const title = String(ev.summary || "").toLowerCase();
+  if (ev.domains.some((d) => rules.zelfstandigDomains.includes(d)) || rules.zelfstandigKeywords.some((k) => k && title.includes(k))) return "Zelfstandig";
+  if (ev.domains.some((d) => !rules.personalDomains.includes(d))) return "Zakelijk";
+  return "";
+}
+
+// Client/purpose: first external attendee domain (not personal, not the employer), else the subject.
+export function eventClient(ev, rules) {
+  const d = ev.domains.find((x) => !rules.personalDomains.includes(x) && !rules.employerDomains.includes(x));
+  return d ? nameFromDomain(d) : String(ev.summary || "").trim();
+}
+
+/**
+ * Meeting that best explains a ride from rideStart to rideEnd (Date objects).
+ * Counts: overlaps the ride, starts within windowMin after arrival, or ended within windowMin
+ * before departure. Closest in time wins; a meeting that gives a Type beats one that does not.
+ * relation: "to" (meeting at the destination) or "from" (meeting at the start place).
+ */
+export function pickEvent(events, rideStart, rideEnd, rules) {
+  const win = rules.windowMin * 60000;
+  let best = null;
+  for (const ev of events || []) {
+    if (ev.allDay || ev.declined) continue;
+    const s = new Date(ev.start), e = new Date(ev.end);
+    if (isNaN(s) || isNaN(e)) continue;
+    if (s > rideEnd.getTime() + win || e < rideStart.getTime() - win) continue;
+    const gap = s > rideEnd ? s - rideEnd : e < rideStart ? rideStart - e : 0;
+    const relation = e <= rideStart ? "from" : "to";
+    const type = eventType(ev, rules);
+    const rank = [type ? 0 : 1, gap];
+    if (!best || rank[0] < best.rank[0] || (rank[0] === best.rank[0] && rank[1] < best.rank[1])) {
+      best = { event: ev, type, client: eventClient(ev, rules), relation, rank };
+    }
+  }
+  if (best) delete best.rank;
+  return best;
+}
+
+// Weekday ride between a Home place and a Work place, either direction.
+export function isPendel(fromPlace, toPlace, date) {
+  const day = date.getDay();
+  if (day === 0 || day === 6) return false;
+  const pair = [fromPlace?.category, toPlace?.category].sort().join("-");
+  return pair === "Home-Work";
+}
+
+// Priority: calendar > Pendel > place default (destination, then start) > Privé.
+export function proposeRideType({ calendarType, fromPlace, toPlace, date }) {
+  if (calendarType) return { type: calendarType, reason: "From your calendar." };
+  if (isPendel(fromPlace, toPlace, date)) return { type: "Pendel", reason: "Weekday ride between Home and Work." };
+  const placeType = toPlace?.defaultType || fromPlace?.defaultType;
+  if (placeType) return { type: placeType, reason: "Default type of the place." };
+  return { type: "Privé", reason: "Default." };
+}
+
+// A business ride much longer than the straight line between start and end: maybe a private stop.
+export function looksMixed(km, startLoc, endLoc, rules) {
+  if (!startLoc || !endLoc) return false;
+  const straightKm = distanceM(startLoc, endLoc) / 1000;
+  return km > rules.mixedFactor * straightKm + rules.mixedMinKm;
+}

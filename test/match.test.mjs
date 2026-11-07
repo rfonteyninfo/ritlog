@@ -50,3 +50,45 @@ assert.equal(proposeType(home, office), "Zakelijk");
 assert.equal(proposeType(office, home), "Zakelijk");
 assert.equal(proposeType(null, null), "Privé");
 console.log("places tests ok");
+
+// ---------- calendar rules ----------
+const { DEFAULT_CALENDAR: R, nameFromDomain, eventType, eventClient, pickEvent, isPendel, proposeRideType, looksMixed } = await import("../app/match.js");
+const ev = (o) => ({ summary: "", domains: [], allDay: false, declined: false, sourceType: "", ...o });
+assert.equal(nameFromDomain("proximus.com"), "Proximus");
+assert.equal(nameFromDomain("mail.syntra-ab.be"), "Syntra-ab");
+assert.equal(eventType(ev({ domains: ["syntra-ab.be"] }), R), "Zelfstandig");
+assert.equal(eventType(ev({ summary: "Les Syntra Mechelen" }), R), "Zelfstandig");
+assert.equal(eventType(ev({ domains: ["huawei.com"] }), R), "Zakelijk");
+assert.equal(eventType(ev({ domains: ["proximus.com", "huawei.com"] }), R), "Zakelijk");
+assert.equal(eventType(ev({ domains: ["gmail.com"] }), R), "");
+assert.equal(eventType(ev({ summary: "Tandarts" }), R), "");
+assert.equal(eventType(ev({ sourceType: "Fun", domains: ["proximus.com"] }), R), "Fun");
+assert.equal(eventClient(ev({ domains: ["huawei.com", "proximus.com"] }), R), "Proximus");
+assert.equal(eventClient(ev({ domains: ["huawei.com"], summary: "Team meeting" }), R), "Team meeting");
+
+const t = (h, m = 0) => new Date(2027, 0, 12, h, m); // Tuesday
+const iso = (d) => d.toISOString();
+const meeting = ev({ summary: "Proximus workshop", domains: ["proximus.com"], start: iso(t(10)), end: iso(t(12)) });
+const dentist = ev({ summary: "Tandarts", start: iso(t(9, 40)), end: iso(t(10, 10)) });
+let p = pickEvent([meeting, dentist], t(9), t(9, 45), R); // arrive 9:45, meeting at 10:00
+assert.equal(p.event.summary, "Proximus workshop"); // typed meeting beats closer untyped one
+assert.deepEqual([p.type, p.client, p.relation], ["Zakelijk", "Proximus", "to"]);
+p = pickEvent([meeting], t(12, 20), t(13), R); // ride back after the meeting
+assert.equal(p.relation, "from");
+assert.equal(pickEvent([meeting], t(14), t(15), R), null); // meeting ended 2 h before departure
+assert.equal(pickEvent([{ ...meeting, declined: true }], t(9), t(9, 45), R), null);
+assert.equal(pickEvent([{ ...meeting, allDay: true }], t(9), t(9, 45), R), null);
+
+const homeP = { category: "Home", defaultType: "" }, workP = { category: "Work", defaultType: "Zakelijk" };
+assert.equal(isPendel(homeP, workP, t(8)), true);
+assert.equal(isPendel(workP, homeP, new Date(2027, 0, 16, 8)), false); // Saturday
+assert.equal(proposeRideType({ calendarType: "Zelfstandig", fromPlace: homeP, toPlace: workP, date: t(8) }).type, "Zelfstandig");
+assert.equal(proposeRideType({ calendarType: "", fromPlace: homeP, toPlace: workP, date: t(8) }).type, "Pendel");
+assert.equal(proposeRideType({ calendarType: "", fromPlace: null, toPlace: workP, date: new Date(2027, 0, 16) }).type, "Zakelijk");
+assert.equal(proposeRideType({ calendarType: "", fromPlace: null, toPlace: null, date: t(8) }).type, "Privé");
+
+const a = { lat: 51.0, lon: 4.4 }, b = { lat: 51.1, lon: 4.4 }; // ~11.1 km apart
+assert.equal(looksMixed(25, a, b, R), false); // 25 <= 2*11.1+5
+assert.equal(looksMixed(30, a, b, R), true);
+assert.equal(looksMixed(30, a, null, R), false);
+console.log("calendar rules tests ok");

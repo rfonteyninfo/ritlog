@@ -14,8 +14,8 @@ Setup: see [SETUP.md](SETUP.md). Design: see [DESIGN.md](DESIGN.md).
 |---|---|---|
 | 1 | Vehicles, odometer photo reading, vehicle proposal, manual fields, Excel row, photo naming | Built |
 | 2 | GPS, known places, From/To proposals | Built |
-| 3 | Calendars, Type rules (incl. Pendel), client and new-place proposals, mixed flag | Next |
-| 4 | Gap warnings, monthly overview, Cambio check, history | |
+| 3 | Calendars, Type rules (incl. Pendel), client and new-place proposals, mixed flag | Built |
+| 4 | Monthly overview, Cambio check, history, correct/delete a ride, reset test data | Next |
 
 ## How the Excel row is written
 

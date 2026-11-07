@@ -89,6 +89,19 @@ Check: Google sometimes renames these menus. If you cannot find a step, search t
 
 ---
 
+## 7. Calendar (phase 3)
+
+Free, no card. Two steps:
+
+1. console.cloud.google.com (signed in as roel@fonteyn.info, project `ritlog` selected) > **APIs & Services > Library**, search **Google Calendar API** > **Enable**.
+2. In the app: **Settings > Connect Google** > sign in > allow the extra permission "See your calendars". Then **Save and test** shows "Calendar connected."
+
+Check: Google may show the new permission only after you removed the old access first. If "Calendar connected." does not appear: myaccount.google.com > Security > Third-party apps with account access > Ritlog > Remove access, then Connect Google again.
+
+The rules (Syntra domains, employer and personal domains, time window, mixed-ride factor) are in **Settings > Calendar** and can be changed there. Extra Google calendars with a fixed type can be added there as well.
+
+---
+
 ## Good to know
 
 - **Excel open on your PC while you save a ride:** the backend checks the file version just before writing. If the file changed, the ride shows "Not in Excel" with a **Retry** button. Save and close the file, wait until Drive for desktop has synced, tap Retry. The check is not atomic: a save from your PC in the same few seconds can still be overwritten.

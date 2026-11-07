@@ -1,5 +1,6 @@
 // Ritlog backend: odometer reading, app state, photos and Excel rows on Google Drive.
-import { Drive, HttpError, authorizeUrl, exchangeCode, isConnected } from "./gdrive.js";
+import { Drive, HttpError, authorizeUrl, exchangeCode, isConnected, hasCalendarAccess } from "./gdrive.js";
+import { listEvents } from "./calendar.js";
 import { readOdometer } from "./odometer.js";
 import { reverseGeocode, searchAddress } from "./geo.js";
 import { appendRitlogRow, findRideRows, fillOdometers } from "./xlsx.js";
@@ -100,6 +101,51 @@ function cleanPlace(body, cfg) {
     radius,
     defaultType: body.defaultType || "",
     address: String(body.address || "").slice(0, 200),
+    domains: cleanList(body.domains, 10),
+  };
+}
+
+// List of short lowercase strings (domains, keywords), from an array or a comma-separated text.
+function cleanList(value, max = 50) {
+  const list = Array.isArray(value) ? value : String(value || "").split(",");
+  return [...new Set(list.map((x) => String(x).trim().toLowerCase()).filter((x) => x && x.length <= 100))].slice(0, max);
+}
+
+// Calendar settings with defaults (phase 3). Sources without a type use the rules.
+const DEFAULT_CALENDAR = {
+  sources: [{ id: "google-primary", name: "Google Calendar", kind: "google", calendarId: "primary", type: "" }],
+  windowMin: 60,
+  zelfstandigDomains: ["syntra-ab.be"],
+  zelfstandigKeywords: ["syntra"],
+  employerDomains: ["huawei.com"],
+  personalDomains: ["fonteyn.info", "gmail.com", "googlemail.com", "outlook.com", "hotmail.com", "live.com", "icloud.com"],
+  mixedFactor: 2,
+  mixedMinKm: 5,
+};
+
+function cleanCalendarSettings(body, cfg) {
+  const c = { ...DEFAULT_CALENDAR, ...(body || {}) };
+  const sources = (Array.isArray(c.sources) ? c.sources : []).slice(0, 10).map((src, i) => {
+    if (src.kind !== "google") throw new HttpError(400, "Only Google calendars are supported for now");
+    if (src.type && !cfg.rideTypes.includes(src.type)) throw new HttpError(400, `Unknown type ${src.type}`);
+    return {
+      id: String(src.id || `google-${i}`).slice(0, 40),
+      name: String(src.name || "Google Calendar").trim().slice(0, 60),
+      kind: "google",
+      calendarId: String(src.calendarId || "primary").trim().slice(0, 200),
+      type: src.type || "",
+    };
+  });
+  const num = (v, min, max, dflt) => (Number(v) >= min && Number(v) <= max ? Number(v) : dflt);
+  return {
+    sources,
+    windowMin: num(c.windowMin, 0, 240, 60),
+    zelfstandigDomains: cleanList(c.zelfstandigDomains),
+    zelfstandigKeywords: cleanList(c.zelfstandigKeywords),
+    employerDomains: cleanList(c.employerDomains),
+    personalDomains: cleanList(c.personalDomains),
+    mixedFactor: num(c.mixedFactor, 1, 10, 2),
+    mixedMinKm: num(c.mixedMinKm, 0, 100, 5),
   };
 }
 
@@ -227,7 +273,37 @@ async function handleApi(request, env, url) {
   let m;
 
   if (path === "/api/status" && request.method === "GET") {
-    return json(env, { connected: await isConnected(env), config: cfg });
+    return json(env, { connected: await isConnected(env), calendar: await hasCalendarAccess(env), config: cfg });
+  }
+
+  if (path === "/api/settings/calendar" && request.method === "POST") {
+    const calendar = cleanCalendarSettings(body, cfg);
+    const { state } = await updateState(drive, cfg, (s) => {
+      s.settings = { ...(s.settings || {}), calendar };
+    });
+    return json(env, { state });
+  }
+
+  // Meetings from all calendar sources between two times. Never fails the ride flow:
+  // problems come back as `error` with an empty list.
+  if (path === "/api/calendar/events" && request.method === "POST") {
+    required(body, ["from", "to"]);
+    const from = new Date(body.from), to = new Date(body.to);
+    if (isNaN(from) || isNaN(to) || to < from || to - from > 3 * 86400000) throw new HttpError(400, "Invalid time window");
+    const { state } = await loadState(drive, cfg);
+    const sources = state.settings?.calendar?.sources || DEFAULT_CALENDAR.sources;
+    const events = [];
+    const errors = [];
+    for (const src of sources) {
+      try {
+        const res = await listEvents(drive, src.calendarId, from.toISOString(), to.toISOString());
+        res.events.forEach((e) => events.push({ ...e, source: src.id, sourceType: src.type || "" }));
+        if (res.error) errors.push(`${src.name}: ${res.error}`);
+      } catch (e) {
+        errors.push(`${src.name}: ${e.message}`);
+      }
+    }
+    return json(env, { events, error: errors.join(" ") || null });
   }
 
   if (path === "/api/state" && request.method === "GET") {
@@ -302,6 +378,7 @@ async function handleApi(request, env, url) {
     const { state } = await updateState(drive, cfg, (s) => {
       const p = (s.places || []).find((x) => x.id === m[1]);
       if (!p) throw new HttpError(404, "Place not found");
+      if (body.domains === undefined) place.domains = p.domains || []; // the edit screen does not send them
       Object.assign(p, place);
     });
     return json(env, { state });
