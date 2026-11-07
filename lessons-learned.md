@@ -11,6 +11,7 @@ Updated after feedback and errors. Each entry: what happened, cause, rule for ne
 | 2026-10-28 | Ask questions one topic at a time and wait for approval before building. |
 | 2026-10-30 | No Microsoft Entra / Azure. No services that require a paid plan or a credit card. |
 | 2026-10-30 | Nothing is committed to this file without Roel's approval. |
+| 2026-11-07 | Never make up data or information. Only report what is actual and verifiable: from a tool result, a file or a source. If it is not checked, say so ("Check:") or check it first. |
 
 ---
 
@@ -76,6 +77,10 @@ Updated after feedback and errors. Each entry: what happened, cause, rule for ne
 ### 13. Data-quality check planned too late (2026-11-07)
 - **What happened:** a forgotten start photo gave a 0 km ride without any warning. The check for unlogged km was in the design (section 7), but planned for phase 4. Roel ran into the problem in the first week.
 - **Rule:** checks that protect the data in the Excel file belong in the first phase, not the last.
+
+### 14. Made-up commit hash (2026-11-07)
+- **What happened:** I reported the lessons commit as `a12c0c5`. That hash does not exist; the real one was `c6b26ac`. I wrote the message without looking at the git output.
+- **Rule:** every ID, number, hash, file name or status in a report is copied from a tool result in the same turn. No result, no claim: run the check first, or say it was not checked.
 
 ---
 
