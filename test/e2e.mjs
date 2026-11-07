@@ -182,7 +182,7 @@ const context = await browser.newContext({ viewport: { width: 390, height: 844 }
 const page = await context.newPage();
 const errors = [];
 page.on("pageerror", (e) => errors.push(e.message));
-page.on("dialog", (d) => d.accept());
+page.on("dialog", (d) => (d.type() === "prompt" ? d.accept("RESET") : d.accept()));
 page.on("response", async (r) => { if (r.status() >= 400) console.log("HTTP", r.status(), r.url(), await r.text().catch(() => "")); });
 const photo = process.argv[2];
 const snap = (name) => page.screenshot({ path: `${process.argv[3]}/${name}.png`, fullPage: true });
@@ -363,6 +363,44 @@ assert.deepEqual([5, 6, 7, 8].map(odo), ["72", "48270", "90", "100"]);
 assert.match(sheetXml, /<c r="L4"[^>]*t="inlineStr"><is><t[^>]*>Km-stand</);
 
 writeFileSync(`${process.argv[3]}/result.xlsx`, files.get(EXCEL).bytes);
+
+// History: filter on Cambio, open the ride, see its photos, correct it
+await page.click('nav button[data-nav="home"]');
+await page.click("#toHistory");
+await page.selectOption("#fVehicle", "Cambio");
+await page.waitForSelector("text=1 ride(s), 59 km");
+await page.click('[data-ride="R0002"]');
+await page.waitForFunction(() => [...document.querySelectorAll("img[data-photo]")].every((i) => i.src.startsWith("blob:")));
+assert.equal(await page.locator("img[data-photo]").count(), 2);
+await snap("9-detail");
+await page.click("#edit");
+await page.selectOption("#type", "Zakelijk");
+await page.fill("#client", "Proximus");
+await page.fill("#end", "48280");
+assert.equal(await page.textContent("#km"), "69 km");
+await page.click("#save");
+await page.waitForSelector("text=Excel row 6 updated");
+const { findRideRows } = await import("../worker/src/xlsx.js");
+const row6 = /<row r="6"[\s\S]*?<\/row>/.exec(strFromU8(unzipSync(files.get(EXCEL).bytes)["xl/worksheets/sheet7.xml"]))[0];
+assert.match(row6, /<c r="C6"[^>]*><is><t[^>]*>Zakelijk</);
+assert.match(row6, /<c r="F6"[^>]*><is><t[^>]*>Proximus</);
+assert.match(row6, /<c r="G6"[^>]*><v>69<\/v>/);
+assert.match(row6, /<c r="L6"[^>]*><v>48280<\/v>/);
+assert.equal(findRideRows(files.get(EXCEL).bytes).R0002, 6);
+
+// Reset: refused while Excel holds app ride IDs, done after the rows are gone
+await page.click('nav button[data-nav="settings"]');
+await page.click("#reset");
+await page.waitForSelector("text=Delete these rows from the Ritlog tab first");
+assert.equal(JSON.parse(new TextDecoder().decode(files.get("/Ritlog-app/state.json").bytes)).rides.length, 4);
+files.set(EXCEL, { bytes: new Uint8Array(readFileSync(new URL("./fixture.xlsx", import.meta.url))) }); // you delete the test rows
+await page.click("#reset");
+await page.waitForSelector("text=Reset done.");
+const st3 = JSON.parse(new TextDecoder().decode(files.get("/Ritlog-app/state.json").bytes));
+assert.deepEqual([st3.rides.length, st3.openRides.length, st3.nextRideNo], [0, 0, 1]);
+assert.equal(st3.vehicles.find((v) => v.name === "Motor").lastReading, 100);
+assert.equal(st3.places.length, 2);
+assert.ok(![...files.keys()].some((n) => /\/Ritlog-fotos\/(\d{4}|_pending)\//.test(n)));
 assert.deepEqual(errors, []);
 await browser.close();
 backend.close();

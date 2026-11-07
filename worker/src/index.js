@@ -3,7 +3,7 @@ import { Drive, HttpError, authorizeUrl, exchangeCode, isConnected, hasCalendarA
 import { listEvents } from "./calendar.js";
 import { readOdometer } from "./odometer.js";
 import { reverseGeocode, searchAddress } from "./geo.js";
-import { appendRitlogRow, findRideRows, fillOdometers } from "./xlsx.js";
+import { appendRitlogRow, findRideRows, fillOdometers, updateRitlogRow } from "./xlsx.js";
 import { rideId, photoName, photoFolder, slug } from "./naming.js";
 
 const XLSX_TYPE = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet";
@@ -559,6 +559,91 @@ async function handleApi(request, env, url) {
     });
     const { state, result } = await writePendingToExcel(drive, cfg);
     return json(env, { ride: state.rides.find((r) => r.id === ride.id), excel: result, state });
+  }
+
+  // Correct a saved ride: the app's record and its Excel row (found by ride ID in column H).
+  if ((m = path.match(/^\/api\/rides\/(R\d+)\/update$/)) && request.method === "POST") {
+    required(body, ["date", "type", "startReading", "endReading"]);
+    checkDate(body.date);
+    if (!cfg.rideTypes.includes(body.type)) throw new HttpError(400, `Unknown type ${body.type}`);
+    const startReading = Math.round(Number(body.startReading));
+    const endReading = Math.round(Number(body.endReading));
+    if (!(startReading >= 0 && endReading >= startReading)) throw new HttpError(400, "End reading must be at least the start reading");
+    const { state: current } = await loadState(drive, cfg);
+    const old = current.rides.find((r) => r.id === m[1]);
+    if (!old) throw new HttpError(404, "Ride not found");
+    const changes = {
+      date: body.date,
+      type: body.type,
+      from: String(body.from || "").slice(0, 100),
+      to: String(body.to || "").slice(0, 100),
+      client: String(body.client || "").slice(0, 100),
+      note: String(body.note || "").slice(0, 300),
+      startReading,
+      endReading,
+      km: endReading - startReading,
+    };
+    // Excel first: if the row cannot be updated, nothing changes in the app either.
+    let excel = { updated: false };
+    if (old.excel === "written") {
+      const file = await drive.download(cfg.excelPath);
+      if (!file) throw new HttpError(404, `Excel file not found on Google Drive at ${cfg.excelPath}`);
+      const row = findRideRows(file.bytes)[old.id];
+      if (!row) throw new HttpError(409, `Ride ${old.id} is no longer in the Excel file (column H). Nothing was changed.`);
+      const res = updateRitlogRow(file.bytes, row, excelValues({ ...old, ...changes }));
+      await drive.upload(cfg.excelPath, res.bytes, XLSX_TYPE, file.etag);
+      excel = { updated: true, row };
+    }
+    const { state } = await updateState(drive, cfg, (s) => {
+      const r = s.rides.find((x) => x.id === old.id);
+      Object.assign(r, changes, excel.updated ? { excelRow: excel.row } : {});
+      // The vehicle's last reading follows its most recent ride.
+      const v = s.vehicles.find((x) => x.id === r.vehicleId);
+      if (v && lastRideOf(s, v.id)?.id === r.id) v.lastReading = endReading;
+    });
+    return json(env, { ride: state.rides.find((r) => r.id === old.id), excel, state });
+  }
+
+  // A ride photo, for the history screen. Only files under the photo folder.
+  if (path === "/api/photo" && request.method === "POST") {
+    required(body, ["path"]);
+    const p = String(body.path);
+    if (!p.startsWith(cfg.photoRoot + "/") || p.includes("..")) throw new HttpError(400, "Not a ride photo");
+    const file = await drive.download(p);
+    if (!file) throw new HttpError(404, "Photo not found");
+    return new Response(file.bytes, { headers: { "Content-Type": "image/jpeg", "Cache-Control": "private, max-age=86400", ...cors(env) } });
+  }
+
+  // Remove test rides before daily use. Keeps vehicles (with their last reading), places and settings.
+  // Refused while the Excel file still holds ride IDs from the app: a new R0001 would match the
+  // old row and never be written.
+  if (path === "/api/reset" && request.method === "POST") {
+    if (body.confirm !== "RESET") throw new HttpError(400, "Type RESET to confirm");
+    const file = await drive.download(cfg.excelPath);
+    if (file) {
+      const rows = Object.entries(findRideRows(file.bytes));
+      if (rows.length) {
+        const list = rows.map(([id, row]) => `${id} (row ${row})`).join(", ");
+        throw new HttpError(409, `Delete these rows from the Ritlog tab first: ${list}. Nothing was reset.`);
+      }
+    }
+    let photos = [];
+    const { state } = await updateState(drive, cfg, (s) => {
+      photos = [...s.rides.flatMap((r) => r.photos || []), ...s.openRides.map((r) => r.startPhoto).filter(Boolean)];
+      s.rides = [];
+      s.openRides = [];
+      s.nextRideNo = 1;
+    });
+    let trashed = 0;
+    for (const p of photos) {
+      try {
+        await drive.remove(p);
+        trashed++;
+      } catch {
+        // a photo that is already gone does not stop the reset
+      }
+    }
+    return json(env, { state, trashed });
   }
 
   if (path === "/api/excel/retry" && request.method === "POST") {

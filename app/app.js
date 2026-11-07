@@ -231,15 +231,12 @@ function renderHome() {
   }
 
   const recent = s.rides.slice(-10).reverse();
-  out += `<h2>Recent rides</h2>`;
+  out += `<div class="row"><h2>Recent rides</h2>${s.rides.length ? `<button class="btn" id="toHistory">All rides</button>` : ""}</div>`;
   if (!recent.length) out += `<p class="muted">No rides yet.</p>`;
-  for (const r of recent) {
-    const status = r.excel === "written" ? `<span class="chip ok">Excel row ${r.excelRow}</span>` : `<span class="chip">Not in Excel</span>`;
-    out += `<div class="card"><div class="row"><b>${esc(r.id)} · ${esc(r.vehicle)} · ${esc(r.type)}</b><b>${r.km} km</b></div>
-      <div class="muted">${fmtDate(r.date)} ${esc(r.time)} · ${esc(r.from || "?")} → ${esc(r.to || "?")}${r.client ? ` · ${esc(r.client)}` : ""}</div>
-      <div style="margin-top:4px">${status}</div></div>`;
-  }
+  out += recent.map(rideCard).join("");
   view.innerHTML = out;
+  view.querySelector("#toHistory")?.addEventListener("click", () => renderHistory());
+  bindRideCards();
 
   view.querySelector("#startRide")?.addEventListener("click", startRide);
   view.querySelector("#toVehicles")?.addEventListener("click", () => go("vehicles"));
@@ -265,6 +262,125 @@ async function refresh() {
     if (!app.state) setState({ version: 1, nextRideNo: 1, vehicles: [], openRides: [], rides: [], settings: {} });
   }
   renderHome();
+}
+
+// ----- ride cards, history, correcting a ride -----
+
+function rideCard(r) {
+  const status = r.excel === "written" ? `<span class="chip ok">Excel row ${r.excelRow}</span>` : `<span class="chip">Not in Excel</span>`;
+  return `<div class="card tap" data-ride="${esc(r.id)}"><div class="row"><b>${esc(r.id)} · ${esc(r.vehicle)} · ${esc(r.type)}</b><b>${r.km} km</b></div>
+      <div class="muted">${fmtDate(r.date)} ${esc(r.time)} · ${esc(r.from || "?")} → ${esc(r.to || "?")}${r.client ? ` · ${esc(r.client)}` : ""}</div>
+      <div style="margin-top:4px">${status}</div></div>`;
+}
+
+function bindRideCards(back) {
+  view.querySelectorAll("[data-ride]").forEach((c) => (c.onclick = () => rideDetail(c.dataset.ride, back)));
+}
+
+const historyFilter = { month: "", vehicle: "", type: "" };
+
+function renderHistory() {
+  const rides = (app.state?.rides || []).slice().reverse();
+  const months = [...new Set(rides.map((r) => r.date.slice(0, 7)))];
+  const vehicles = [...new Set(rides.map((r) => r.vehicle))];
+  const types = [...new Set(rides.map((r) => r.type))];
+  const opt = (list, sel, label) => `<option value="">${label}</option>` + list.map((x) => `<option ${x === sel ? "selected" : ""}>${esc(x)}</option>`).join("");
+  const shown = rides.filter(
+    (r) => (!historyFilter.month || r.date.startsWith(historyFilter.month)) && (!historyFilter.vehicle || r.vehicle === historyFilter.vehicle) && (!historyFilter.type || r.type === historyFilter.type)
+  );
+  const km = shown.reduce((sum, r) => sum + r.km, 0);
+  view.innerHTML = `
+    <h2>All rides</h2>
+    <div class="row"><select id="fMonth">${opt(months, historyFilter.month, "All months")}</select><select id="fVehicle">${opt(vehicles, historyFilter.vehicle, "All vehicles")}</select></div>
+    <div class="row" style="margin-top:8px"><select id="fType">${opt(types, historyFilter.type, "All types")}</select></div>
+    <p class="muted">${shown.length} ride(s), ${km} km</p>
+    ${shown.map(rideCard).join("") || `<p class="muted">No rides match.</p>`}
+    <div class="actions"><button class="btn" id="back">Back</button></div>`;
+  for (const [id, key] of [["#fMonth", "month"], ["#fVehicle", "vehicle"], ["#fType", "type"]]) {
+    view.querySelector(id).onchange = (e) => {
+      historyFilter[key] = e.target.value;
+      renderHistory();
+    };
+  }
+  view.querySelector("#back").onclick = renderHome;
+  bindRideCards(renderHistory);
+}
+
+// Photo from Google Drive through the backend (an <img> cannot send the access code itself).
+async function loadPhoto(img, path) {
+  try {
+    const { workerUrl, token } = app.settings;
+    const res = await fetch(workerUrl.replace(/\/$/, "") + "/api/photo", {
+      method: "POST",
+      headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+      body: JSON.stringify({ path }),
+    });
+    if (!res.ok) throw new Error();
+    img.src = URL.createObjectURL(await res.blob());
+  } catch {
+    img.replaceWith(Object.assign(document.createElement("div"), { className: "muted", textContent: "Photo not available." }));
+  }
+}
+
+function rideDetail(id, back = renderHome) {
+  const r = app.state.rides.find((x) => x.id === id);
+  if (!r) return back();
+  const line = (label, value) => (value ? `<div class="row"><span class="muted">${label}</span><span>${esc(value)}</span></div>` : "");
+  view.innerHTML = `
+    <h2>${esc(r.id)} · ${esc(r.vehicle)}</h2>
+    <div class="card">
+      ${line("Date", `${fmtDate(r.date)} ${r.time}${r.endTime && r.endTime !== r.time ? `–${r.endTime}` : ""}`)}
+      ${line("Type", r.type)}
+      ${line("From", r.from)}
+      ${line("To", r.to)}
+      ${line("Client / purpose", r.client)}
+      ${line("Odometer", `${r.startReading} → ${r.endReading} km`)}
+      ${line("Km", String(r.km))}
+      ${line("Note", [r.autoNote, r.note].filter(Boolean).join(" - "))}
+      ${line("Excel", r.excel === "written" ? `row ${r.excelRow}` : "not yet")}
+    </div>
+    ${(r.photos || []).map((p) => `<img class="preview" data-photo="${esc(p)}" alt="Odometer photo" style="margin-bottom:8px">`).join("") || `<p class="muted">No photos (km logged without photos).</p>`}
+    <div class="actions"><button class="btn primary" id="edit">Correct</button><button class="btn" id="back">Back</button></div>`;
+  view.querySelectorAll("[data-photo]").forEach((img) => loadPhoto(img, img.dataset.photo));
+  view.querySelector("#back").onclick = () => back();
+  view.querySelector("#edit").onclick = () => editRide(id, back);
+}
+
+function editRide(id, back) {
+  const r = app.state.rides.find((x) => x.id === id);
+  view.innerHTML = `
+    <h2>Correct ${esc(r.id)} · ${esc(r.vehicle)}</h2>
+    <label>Date</label><input id="date" type="date" value="${esc(r.date)}">
+    <label>Type</label><select id="type">${typeOptions(r.type, false)}</select>
+    <div class="row"><label style="flex:1">Start (km)<input id="start" type="number" inputmode="numeric" value="${r.startReading}"></label><label style="flex:1">End (km)<input id="end" type="number" inputmode="numeric" value="${r.endReading}"></label></div>
+    <div class="km" id="km"></div>
+    <label>From</label><input id="from" autocomplete="off" value="${esc(r.from)}">
+    <label>To</label><input id="to" autocomplete="off" value="${esc(r.to)}">
+    <label>Client / purpose</label><input id="client" autocomplete="off" value="${esc(r.client)}">
+    <label>Note</label><input id="note" autocomplete="off" value="${esc(r.note)}">
+    <p class="muted">Saving also changes the ride's row in Excel. The vehicle cannot be changed here.</p>
+    <div class="actions"><button class="btn primary" id="save">Save correction</button><button class="btn" id="back">Cancel</button></div>`;
+  const kmText = () => {
+    const km = Number(view.querySelector("#end").value) - Number(view.querySelector("#start").value);
+    view.querySelector("#km").textContent = km >= 0 ? `${km} km` : "End is lower than start";
+  };
+  view.querySelector("#start").oninput = kmText;
+  view.querySelector("#end").oninput = kmText;
+  kmText();
+  view.querySelector("#back").onclick = () => rideDetail(id, back);
+  view.querySelector("#save").onclick = async () => {
+    const val = (sel) => view.querySelector(sel).value.trim();
+    const body = { date: val("#date"), type: val("#type"), startReading: Number(val("#start")), endReading: Number(val("#end")), from: val("#from"), to: val("#to"), client: val("#client"), note: val("#note") };
+    if (!(body.endReading >= body.startReading)) return toast("End must be at least the start reading.");
+    busy("Saving correction…");
+    try {
+      const res = await api(`/api/rides/${encodeURIComponent(id)}/update`, body);
+      toast(res.excel.updated ? `${id} corrected, Excel row ${res.excel.row} updated.` : `${id} corrected.`, 6000);
+    } catch (e) {
+      toast(e.message, 8000);
+    }
+    rideDetail(id, back);
+  };
 }
 
 // ----- start ride -----
@@ -742,8 +858,23 @@ async function renderSettings() {
     <h2>Google</h2>
     <p class="muted">Connect once. The backend keeps access to your Google Drive files and reads your calendar.</p>
     <a class="btn" id="connect" target="_blank" rel="noopener">Connect Google</a>
-    ${calendarSettingsHtml()}`;
+    ${calendarSettingsHtml()}
+    <h2>Reset test data</h2>
+    <p class="muted">Removes all rides and open rides from the app and moves their photos to the Google Drive trash. Ride numbers start again at R0001. Vehicles (with their last odometer reading), places and settings stay. First delete the test rows from the Ritlog tab yourself.</p>
+    <div class="actions"><button class="btn" id="reset">Reset test data</button></div>`;
   bindCalendarSettings();
+  view.querySelector("#reset").onclick = async () => {
+    const typed = prompt("Type RESET to remove all rides and their photos.");
+    if (typed !== "RESET") return toast("Nothing was reset.");
+    busy("Resetting…");
+    try {
+      const res = await api("/api/reset", { confirm: "RESET" });
+      toast(`Reset done. ${res.trashed} photo(s) moved to the trash.`, 6000);
+    } catch (e) {
+      toast(e.message, 10000);
+    }
+    renderSettings();
+  };
   const connect = view.querySelector("#connect");
   const setLink = () => {
     const u = view.querySelector("#url").value.replace(/\/$/, "");

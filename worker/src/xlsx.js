@@ -192,12 +192,8 @@ export function findRideRows(xlsxBytes, sheetName = "Ritlog") {
  * values: { date: "YYYY-MM-DD", vehicle, type, from, to, client, km (number), note }
  * Returns { bytes: Uint8Array, row: number }
  */
-export function appendRitlogRow(xlsxBytes, values, sheetName = "Ritlog") {
-  const files = unzipSync(xlsxBytes);
-  const sheetPath = findSheetPath(files, sheetName);
-  let sheet = strFromU8(files[sheetPath]);
-
-  const n = firstEmptyRow(sheet);
+// Writes A to H and L of row n (creating the row when needed).
+function writeRow(sheet, n, values) {
   const cellValues = [
     excelSerial(values.date),
     values.vehicle,
@@ -208,7 +204,6 @@ export function appendRitlogRow(xlsxBytes, values, sheetName = "Ritlog") {
     Number(values.km),
     values.note || "",
   ];
-
   sheet = ensureOdometerColumn(sheet);
   const row = locateRow(sheet, n);
   let rowXml = row ? row.xml : `<row r="${n}"/>`;
@@ -219,15 +214,32 @@ export function appendRitlogRow(xlsxBytes, values, sheetName = "Ritlog") {
   if (values.odometer >= 0) rowXml = setCell(rowXml, `${ODO_COL}${n}`, Number(values.odometer), styleOf(rowXml, `B${n}`));
   if (row) sheet = sheet.slice(0, row.start) + rowXml + sheet.slice(row.end);
   else sheet = insertRow(sheet, n, rowXml);
-
-  // Keep <dimension> covering the new row.
-  sheet = sheet.replace(/<dimension ref="([A-Z]+)(\d+):([A-Z]+)(\d+)"\/>/, (m, c1, r1, c2, r2) =>
+  // Keep <dimension> covering the row.
+  return sheet.replace(/<dimension ref="([A-Z]+)(\d+):([A-Z]+)(\d+)"\/>/, (m, c1, r1, c2, r2) =>
     Number(r2) >= n ? m : `<dimension ref="${c1}${r1}:${c2}${n}"/>`
   );
+}
 
+function editSheet(xlsxBytes, sheetName, edit) {
+  const files = unzipSync(xlsxBytes);
+  const sheetPath = findSheetPath(files, sheetName);
+  const { sheet, result } = edit(strFromU8(files[sheetPath]));
   files[sheetPath] = strToU8(sheet);
   ensureFullCalc(files);
-  return { bytes: zipSync(files, { level: 6 }), row: n };
+  return { bytes: zipSync(files, { level: 6 }), ...result };
+}
+
+export function appendRitlogRow(xlsxBytes, values, sheetName = "Ritlog") {
+  return editSheet(xlsxBytes, sheetName, (sheet) => {
+    const n = firstEmptyRow(sheet);
+    return { sheet: writeRow(sheet, n, values), result: { row: n } };
+  });
+}
+
+// Overwrites A to H and L of an existing ride row (a corrected ride).
+export function updateRitlogRow(xlsxBytes, n, values, sheetName = "Ritlog") {
+  if (!(n >= FIRST_DATA_ROW)) throw new Error(`Invalid row ${n}`);
+  return editSheet(xlsxBytes, sheetName, (sheet) => ({ sheet: writeRow(sheet, n, values), result: { row: n } }));
 }
 
 /**
