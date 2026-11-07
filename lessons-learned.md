@@ -73,6 +73,10 @@ Updated after feedback and errors. Each entry: what happened, cause, rule for ne
 - **What happened:** I wrote "I've added this to the local file" before writing the entry. It was only written after Roel said "commit".
 - **Rule:** only report an action as done after the tool call has run. Otherwise write "I will add it".
 
+### 13. Data-quality check planned too late (2026-11-07)
+- **What happened:** a forgotten start photo gave a 0 km ride without any warning. The check for unlogged km was in the design (section 7), but planned for phase 4. Roel ran into the problem in the first week.
+- **Rule:** checks that protect the data in the Excel file belong in the first phase, not the last.
+
 ---
 
 ## Technical notes
@@ -81,3 +85,4 @@ Updated after feedback and errors. Each entry: what happened, cause, rule for ne
 - Node ES modules ignore `NODE_PATH`. Load a global package (Playwright) with `createRequire`.
 - A chain of commands with `&&` stops at the first failure. Check the output before assuming later steps ran.
 - GPS (2026-11-01, caught in testing): the browser can return a cached position (`maximumAge`). For ride photos, always ask for a fresh position (`maximumAge: 0`), or the end of a short ride can get the start position.
+- CSS: give `[hidden]` `display: none !important`, or elements with their own `display` (styled buttons) stay visible when hidden (2026-11-07, caught in testing).
