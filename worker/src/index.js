@@ -2,7 +2,7 @@
 import { Drive, HttpError, authorizeUrl, exchangeCode, isConnected } from "./gdrive.js";
 import { readOdometer } from "./odometer.js";
 import { reverseGeocode, searchAddress } from "./geo.js";
-import { appendRitlogRow, findRideRows } from "./xlsx.js";
+import { appendRitlogRow, findRideRows, fillOdometers } from "./xlsx.js";
 import { rideId, photoName, photoFolder, slug } from "./naming.js";
 
 const XLSX_TYPE = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet";
@@ -148,6 +148,7 @@ function excelValues(ride) {
     client: ride.client,
     km: ride.km,
     note: [ride.id, ride.autoNote, ride.note].filter(Boolean).join(" - "),
+    odometer: ride.endReading,
   };
 }
 
@@ -176,6 +177,16 @@ async function writePendingToExcel(drive, cfg) {
         const res = appendRitlogRow(bytes, excelValues(ride));
         bytes = res.bytes;
         rows[ride.id] = res.row;
+        changed = true;
+      }
+      // Rows written before column L existed get their odometer reading once.
+      const backfill = {};
+      for (const ride of state.rides) {
+        if (existing[ride.id] && ride.endReading >= 0) backfill[existing[ride.id]] = ride.endReading;
+      }
+      const filled = fillOdometers(bytes, backfill);
+      if (filled.changed) {
+        bytes = filled.bytes;
         changed = true;
       }
       if (changed) await drive.upload(cfg.excelPath, bytes, XLSX_TYPE, file.etag);

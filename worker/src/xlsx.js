@@ -4,6 +4,10 @@
 import { unzipSync, zipSync, strFromU8, strToU8 } from "fflate";
 
 const COLS = ["A", "B", "C", "D", "E", "F", "G", "H"];
+// Column L: odometer reading at the end of the ride (added by the app, right of the formulas I to K).
+const ODO_COL = "L";
+const ODO_HEADER = "Km-stand";
+const HEADER_ROW = 4;
 const FIRST_DATA_ROW = 5;
 
 export function excelSerial(isoDate) {
@@ -76,14 +80,15 @@ function buildCell(ref, style, value) {
   return `<c r="${ref}"${s} t="inlineStr"><is><t xml:space="preserve">${xmlEscape(value)}</t></is></c>`;
 }
 
-function setCell(rowXml, ref, value) {
+// styleIfNew: style index for a cell that does not exist yet (an existing cell keeps its own).
+function setCell(rowXml, ref, value, styleIfNew = null) {
   const existing = locateCell(rowXml, ref);
   if (existing) {
-    const style = /\bs="(\d+)"/.exec(existing.xml)?.[1];
+    const style = /\bs="(\d+)"/.exec(existing.xml)?.[1] ?? styleIfNew;
     return rowXml.slice(0, existing.start) + buildCell(ref, style, value) + rowXml.slice(existing.end);
   }
   // Insert in column order.
-  const newCell = buildCell(ref, null, value);
+  const newCell = buildCell(ref, styleIfNew, value);
   const target = colIndex(ref);
   const cellRe = /<c\b[^>]*\br="([A-Z]+)\d+"/g;
   let m;
@@ -118,6 +123,26 @@ function insertRow(sheet, n, rowXml) {
     if (Number(m[1]) > n) return sheet.slice(0, m.index) + rowXml + sheet.slice(m.index);
   }
   return sheet.replace("</sheetData>", rowXml + "</sheetData>").replace("<sheetData/>", `<sheetData>${rowXml}</sheetData>`);
+}
+
+function styleOf(rowXml, ref) {
+  return /\bs="(\d+)"/.exec(locateCell(rowXml, ref)?.xml || "")?.[1] ?? null;
+}
+
+// Header "Km-stand" in L4 (styled like the other headers), a column width, and a
+// <dimension> that covers column L. Leaves a header the user typed in L4 alone.
+function ensureOdometerColumn(sheet) {
+  const header = locateRow(sheet, HEADER_ROW);
+  if (header && !cellHasValue(locateCell(header.xml, `${ODO_COL}${HEADER_ROW}`)?.xml)) {
+    const xml = setCell(header.xml, `${ODO_COL}${HEADER_ROW}`, ODO_HEADER, styleOf(header.xml, `K${HEADER_ROW}`));
+    sheet = sheet.slice(0, header.start) + xml + sheet.slice(header.end);
+  }
+  const col = colIndex(ODO_COL);
+  const covered = [...sheet.matchAll(/<col\b[^>]*\bmin="(\d+)"[^>]*\bmax="(\d+)"/g)].some((m) => Number(m[1]) <= col && Number(m[2]) >= col);
+  if (!covered && /<\/cols>/.test(sheet)) sheet = sheet.replace("</cols>", `<col min="${col}" max="${col}" width="11" customWidth="1"/></cols>`);
+  return sheet.replace(/<dimension ref="([A-Z]+)(\d+):([A-Z]+)(\d+)"\/>/, (m, c1, r1, c2, r2) =>
+    colIndex(c2) >= col ? m : `<dimension ref="${c1}${r1}:${ODO_COL}${r2}"/>`
+  );
 }
 
 function ensureFullCalc(files) {
@@ -184,11 +209,14 @@ export function appendRitlogRow(xlsxBytes, values, sheetName = "Ritlog") {
     values.note || "",
   ];
 
+  sheet = ensureOdometerColumn(sheet);
   const row = locateRow(sheet, n);
   let rowXml = row ? row.xml : `<row r="${n}"/>`;
   COLS.forEach((col, i) => {
     rowXml = setCell(rowXml, `${col}${n}`, cellValues[i]);
   });
+  // Odometer formatted like column B ("#,##0").
+  if (values.odometer >= 0) rowXml = setCell(rowXml, `${ODO_COL}${n}`, Number(values.odometer), styleOf(rowXml, `B${n}`));
   if (row) sheet = sheet.slice(0, row.start) + rowXml + sheet.slice(row.end);
   else sheet = insertRow(sheet, n, rowXml);
 
@@ -200,6 +228,27 @@ export function appendRitlogRow(xlsxBytes, values, sheetName = "Ritlog") {
   files[sheetPath] = strToU8(sheet);
   ensureFullCalc(files);
   return { bytes: zipSync(files, { level: 6 }), row: n };
+}
+
+/**
+ * Fill column L for rows written before the column existed. Only empty cells are filled.
+ * odometers: { rowNumber: reading }. Returns { bytes, changed }.
+ */
+export function fillOdometers(xlsxBytes, odometers, sheetName = "Ritlog") {
+  const files = unzipSync(xlsxBytes);
+  const sheetPath = findSheetPath(files, sheetName);
+  let sheet = ensureOdometerColumn(strFromU8(files[sheetPath]));
+  let changed = 0;
+  for (const [n, value] of Object.entries(odometers)) {
+    const row = locateRow(sheet, n);
+    if (!row || cellHasValue(locateCell(row.xml, `${ODO_COL}${n}`)?.xml)) continue;
+    const xml = setCell(row.xml, `${ODO_COL}${n}`, Number(value), styleOf(row.xml, `B${n}`));
+    sheet = sheet.slice(0, row.start) + xml + sheet.slice(row.end);
+    changed++;
+  }
+  if (!changed) return { bytes: xlsxBytes, changed };
+  files[sheetPath] = strToU8(sheet);
+  return { bytes: zipSync(files, { level: 6 }), changed };
 }
 
 export const _internal = { firstEmptyRow, locateRow, locateCell, rowNumberOf };

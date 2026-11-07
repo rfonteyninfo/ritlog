@@ -330,6 +330,13 @@ assert.deepEqual([gap.km, gap.type, gap.gap, gap.excelRow], [10, "Privé", true,
 assert.equal(st2.openRides[0].startReading, 100);
 assert.equal(st2.vehicles.find((v) => v.name === "Motor").lastReading, 100);
 
+// Column L holds the odometer reading at the end of each ride
+const { unzipSync, strFromU8 } = await import("../worker/node_modules/fflate/esm/index.mjs");
+const sheetXml = strFromU8(unzipSync(files.get(EXCEL).bytes)["xl/worksheets/sheet7.xml"]);
+const odo = (n) => /<c r="L\d+"[^>]*><v>(\d+)<\/v>/.exec(/<row r="\d+"[^>]*>[\s\S]*?<\/row>/g[Symbol.match](sheetXml).find((r) => r.startsWith(`<row r="${n}"`)))?.[1];
+assert.deepEqual([5, 6, 7, 8].map(odo), ["72", "48270", "90", "100"]);
+assert.match(sheetXml, /<c r="L4"[^>]*t="inlineStr"><is><t[^>]*>Km-stand</);
+
 writeFileSync(`${process.argv[3]}/result.xlsx`, files.get(EXCEL).bytes);
 assert.deepEqual(errors, []);
 await browser.close();
