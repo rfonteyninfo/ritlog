@@ -131,6 +131,11 @@ async function updateState(drive, cfg, mutate) {
   }
 }
 
+// Most recent finished ride of a vehicle.
+function lastRideOf(state, vehicleId) {
+  return state.rides.filter((r) => r.vehicleId === vehicleId).at(-1) || null;
+}
+
 // ---------- Excel ----------
 
 function excelValues(ride) {
@@ -142,7 +147,7 @@ function excelValues(ride) {
     to: ride.to,
     client: ride.client,
     km: ride.km,
-    note: ride.note ? `${ride.id} - ${ride.note}` : ride.id,
+    note: [ride.id, ride.autoNote, ride.note].filter(Boolean).join(" - "),
   };
 }
 
@@ -298,6 +303,72 @@ async function handleApi(request, env, url) {
     return json(env, { state });
   }
 
+  // The odometer is higher than the vehicle's last recorded reading and the photo is the END
+  // of a ride: open a ride that starts at the last recorded reading, without a start photo.
+  if (path === "/api/rides/start-from-last" && request.method === "POST") {
+    required(body, ["vehicleId", "date"]);
+    checkDate(body.date);
+    const { result: ride } = await updateState(drive, cfg, (s) => {
+      const v = s.vehicles.find((x) => x.id === body.vehicleId && x.active);
+      if (!v) throw new HttpError(400, "Unknown vehicle. Register it first.");
+      const last = lastRideOf(s, v.id);
+      const r = {
+        id: rideId(s.nextRideNo++),
+        vehicle: v.name,
+        vehicleId: v.id,
+        startReading: v.lastReading,
+        date: body.date,
+        startTime: String(v.lastReadingAt || "").split(" ")[1] || "00:00",
+        startLocation: last?.endLocation || null,
+        startPhoto: null,
+        noStartPhoto: true,
+      };
+      s.openRides.push(r);
+      return r;
+    });
+    const { state } = await loadState(drive, cfg);
+    return json(env, { ride, state });
+  }
+
+  // Km driven without photos: logged as their own row, from the last recorded reading
+  // to the new reading. The vehicle's last reading moves to the new reading.
+  if (path === "/api/rides/gap" && request.method === "POST") {
+    required(body, ["vehicleId", "reading", "date", "time", "type"]);
+    checkDate(body.date, body.time);
+    if (!cfg.rideTypes.includes(body.type)) throw new HttpError(400, `Unknown type ${body.type}`);
+    const reading = Math.round(Number(body.reading));
+    await updateState(drive, cfg, (s) => {
+      const v = s.vehicles.find((x) => x.id === body.vehicleId && x.active);
+      if (!v) throw new HttpError(400, "Unknown vehicle. Register it first.");
+      if (!(reading > v.lastReading)) throw new HttpError(400, `Reading ${reading} is not higher than the last recorded ${v.lastReading}`);
+      const last = lastRideOf(s, v.id);
+      s.rides.push({
+        id: rideId(s.nextRideNo++),
+        date: body.date,
+        time: body.time,
+        endTime: body.time,
+        vehicle: v.name,
+        vehicleId: v.id,
+        type: body.type,
+        from: body.from || last?.to || "",
+        to: body.to || "",
+        client: "",
+        note: body.note || "",
+        autoNote: "km not logged with photos",
+        startReading: v.lastReading,
+        endReading: reading,
+        km: reading - v.lastReading,
+        gap: true,
+        photos: [],
+        excel: "pending",
+      });
+      v.lastReading = reading;
+      v.lastReadingAt = `${body.date} ${body.time}`;
+    });
+    const { state, result } = await writePendingToExcel(drive, cfg);
+    return json(env, { ride: state.rides[state.rides.length - 1], excel: result, state });
+  }
+
   if (path === "/api/rides/start" && request.method === "POST") {
     required(body, ["vehicle", "date", "time", "image"]);
     checkDate(body.date, body.time);
@@ -373,12 +444,17 @@ async function handleApi(request, env, url) {
       endLocation: cleanLocation(body.location),
       excel: "pending",
     };
+    if (open.noStartPhoto) ride.autoNote = "no start photo, km from last recorded reading";
     const folder = photoFolder(cfg.photoRoot, ride.date);
     const endPath = `${folder}/${photoName(ride, "end")}`;
-    const startName = photoName(ride, "start");
     await drive.upload(endPath, b64ToBytes(body.image), "image/jpeg"); // also creates the folder
-    await drive.move(open.startPhoto, folder, startName);
-    ride.photos = [`${folder}/${startName}`, endPath];
+    if (open.startPhoto) {
+      const startName = photoName(ride, "start");
+      await drive.move(open.startPhoto, folder, startName);
+      ride.photos = [`${folder}/${startName}`, endPath];
+    } else {
+      ride.photos = [endPath];
+    }
 
     await updateState(drive, cfg, (s) => {
       s.openRides = s.openRides.filter((r) => r.id !== ride.id);

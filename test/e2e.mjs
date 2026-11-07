@@ -193,7 +193,7 @@ await page.waitForSelector("text=Google Drive connected");
 await snap("1-settings");
 
 // Register Motor and Auto (both new, near 0 km)
-for (const [name, km, cls] of [["Motor", 12, "motorcycle"], ["Auto", 25, "car"]]) {
+for (const [name, km, cls] of [["Motor", 30, "motorcycle"], ["Auto", 25, "car"]]) {
   await page.click('nav button[data-nav="vehicles"]');
   await page.click("#add");
   await page.selectOption("#name", name);
@@ -291,6 +291,44 @@ assert.equal(retryJson.state.rides[0].excelRow, 5);
 // Wrong token rejected
 const bad = await worker.fetch(new Request("http://localhost:8787/api/state", { headers: { Authorization: "Bearer nope" } }), env);
 assert.equal(bad.status, 401);
+
+// Forgotten start photo: start photo shows 90, Motor's last recorded reading is 72
+await page.reload();
+await page.waitForSelector("#startRide");
+readings.push({ readable: true, odometer_km: 90, unit: "km", dashboard_class: "motorcycle", confidence: "high", note: "" });
+await shoot("#startRide");
+await page.waitForSelector("#go");
+await page.click("#go");
+await page.waitForSelector("text=18 km not logged");
+await snap("7-gap-choice");
+await page.click("#asEnd");
+await page.waitForSelector("#save");
+assert.equal(await page.textContent("#km"), "18 km");
+assert.equal(await page.inputValue("#from"), "Proximus Evere"); // end place of the previous Motor ride
+assert.equal(await page.inputValue("#to"), "Home");
+assert.ok(await page.isHidden("#retake"));
+await snap("8-end-no-start");
+await page.click("#save");
+await page.waitForSelector("text=Excel row 7");
+
+// Unlogged ride: start photo shows 100, last recorded 90
+readings.push({ readable: true, odometer_km: 100, unit: "km", dashboard_class: "motorcycle", confidence: "high", note: "" });
+await shoot("#startRide");
+await page.waitForSelector("#go");
+await page.click("#go");
+await page.waitForSelector("text=10 km not logged");
+await page.click("#asGap");
+assert.equal(await page.inputValue("#gapType"), "Privé");
+await page.click("#gapSave");
+await page.waitForSelector("text=without an end photo");
+const st2 = JSON.parse(new TextDecoder().decode(files.get("/Ritlog-app/state.json").bytes));
+const noStart = st2.rides.find((r) => r.id === "R0003");
+assert.equal(noStart.km, 18);
+assert.equal(noStart.photos.length, 1);
+const gap = st2.rides.find((r) => r.id === "R0004");
+assert.deepEqual([gap.km, gap.type, gap.gap, gap.excelRow], [10, "Privé", true, 8]);
+assert.equal(st2.openRides[0].startReading, 100);
+assert.equal(st2.vehicles.find((v) => v.name === "Motor").lastReading, 100);
 
 writeFileSync(`${process.argv[3]}/result.xlsx`, files.get(EXCEL).bytes);
 assert.deepEqual(errors, []);

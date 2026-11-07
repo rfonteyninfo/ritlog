@@ -298,6 +298,8 @@ async function startRide() {
     const isCambio = sel === "cambio";
     const vehicle = isCambio ? null : vehicles.find((v) => v.id === sel);
     if (vehicle && value < vehicle.lastReading - 2 && !confirm(`${value} km is lower than the last known reading of ${vehicle.name} (${vehicle.lastReading} km). Start anyway?`)) return;
+    // Higher than the last recorded reading: km were driven without photos.
+    if (vehicle && value > vehicle.lastReading) return gapChoice(vehicle, value, image, ocr, location);
     const { date, time } = nowLocal();
     busy("Saving start…");
     try {
@@ -320,19 +322,24 @@ async function startRide() {
 
 // ----- end ride -----
 
-async function endRide(id) {
+// pre: {image, ocr, location} when the end photo was already taken (start photo forgotten).
+async function endRide(id, pre = null) {
   const ride = app.state.openRides.find((r) => r.id === id);
   if (!ride) return renderHome();
-  const position = getPosition(); // runs while the camera is open
-  let image;
-  try {
-    image = await takePhoto();
-  } catch {
-    return;
+  let image, ocr, endLocation;
+  if (pre) {
+    ({ image, ocr, location: endLocation } = pre);
+  } else {
+    const position = getPosition(); // runs while the camera is open
+    try {
+      image = await takePhoto();
+    } catch {
+      return;
+    }
+    ocr = await readOdometer(image);
+    busy("Looking up location…");
+    endLocation = await position;
   }
-  const ocr = await readOdometer(image);
-  busy("Looking up location…");
-  const endLocation = await position;
   const fromMatch = nearestPlace(places(), ride.startLocation);
   const toMatch = nearestPlace(places(), endLocation);
   const [fromAddress, toAddress] = await Promise.all([
@@ -342,7 +349,7 @@ async function endRide(id) {
   const from = fromMatch ? fromMatch.place.name : fromAddress;
   const to = toMatch ? toMatch.place.name : toAddress;
   const proposedType = proposeType(fromMatch?.place, toMatch?.place);
-  const reading = ocr.readable ? ocr.odometer_km : "";
+  const reading = pre ? pre.reading : ocr.readable ? ocr.odometer_km : "";
 
   // Offer to save unknown start/end positions as known places.
   const newPlaceBlock = (key, label, loc) =>
@@ -358,6 +365,7 @@ async function endRide(id) {
 
   view.innerHTML = `
     <h2>End ride ${esc(ride.id)} · ${esc(ride.vehicle)}</h2>
+    ${ride.noStartPhoto ? `<div class="banner"><b>No start photo.</b> Km counted from the last recorded reading, ${ride.startReading} km.</div>` : ""}
     <img class="preview" src="${image}" alt="Odometer photo">
     <label>Odometer (km) · start was ${ride.startReading}</label>
     <input class="reading" id="reading" type="number" inputmode="numeric" value="${reading}">
@@ -397,6 +405,7 @@ async function endRide(id) {
 
   view.querySelector("#back").onclick = renderHome;
   view.querySelector("#retake").onclick = () => endRide(id);
+  if (pre) view.querySelector("#retake").hidden = true;
   view.querySelector("#save").onclick = async () => {
     const v = Number(input.value);
     if (!input.value || v < ride.startReading) return toast("Check the odometer reading.");
@@ -521,6 +530,52 @@ function editPlace(place) {
       toast(e.message, 6000);
     }
     renderPlaces();
+  };
+}
+
+// ----- km driven without photos -----
+
+function gapChoice(vehicle, reading, image, ocr, location) {
+  const km = reading - vehicle.lastReading;
+  view.innerHTML = `
+    <h2>${km} km not logged</h2>
+    <div class="banner">This photo shows <b>${reading} km</b>. The last recorded reading of ${esc(vehicle.name)} is <b>${vehicle.lastReading} km</b> (${esc(vehicle.lastReadingAt)}).</div>
+    <p>What happened?</p>
+    <button class="big" id="asEnd">This photo is the end of a ride</button>
+    <p class="muted">You forgot the start photo. The ride counts ${km} km from the last recorded reading. Fill in the ride now, no second photo needed.</p>
+    <button class="btn" id="asGap" style="width:100%">A ride was not logged</button>
+    <p class="muted">The ${km} km are saved as a separate row. Then this ride starts at ${reading} km.</p>
+    <div id="gapForm" hidden>
+      <label>Type of the unlogged ${km} km</label><select id="gapType">${typeOptions("Privé", false)}</select>
+      <label>Note</label><input id="gapNote" autocomplete="off">
+      <div class="actions"><button class="btn primary" id="gapSave">Save ${km} km and start ride</button></div>
+    </div>
+    <div class="actions"><button class="btn" id="back">Back</button></div>`;
+  view.querySelector("#back").onclick = renderHome;
+  view.querySelector("#asEnd").onclick = async () => {
+    busy("Opening ride…");
+    try {
+      const res = await api("/api/rides/start-from-last", { vehicleId: vehicle.id, date: nowLocal().date });
+      return endRide(res.ride.id, { image, ocr, location, reading });
+    } catch (e) {
+      toast(e.message, 6000);
+      renderHome();
+    }
+  };
+  view.querySelector("#asGap").onclick = () => (view.querySelector("#gapForm").hidden = false);
+  view.querySelector("#gapSave").onclick = async () => {
+    const type = view.querySelector("#gapType").value;
+    const note = view.querySelector("#gapNote").value.trim();
+    const { date, time } = nowLocal();
+    busy("Saving…");
+    try {
+      const gap = await api("/api/rides/gap", { vehicleId: vehicle.id, reading, date, time, type, note });
+      const res = await api("/api/rides/start", { vehicle: vehicle.name, vehicleId: vehicle.id, reading, date, time, image, location });
+      toast(`${gap.ride.id}: ${km} km saved${gap.excel?.error ? " (not in Excel yet)" : ""}. Ride ${res.ride.id} started.`, 6000);
+    } catch (e) {
+      toast(e.message, 6000);
+    }
+    renderHome();
   };
 }
 

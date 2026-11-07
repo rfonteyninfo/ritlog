@@ -25,6 +25,7 @@
   }
 }
 * { box-sizing: border-box; border-radius: 0; }
+[hidden] { display: none !important; }
 html, body { background: var(--surface); }
 body {
   margin: 0;
